@@ -26,6 +26,41 @@ jobs:
       - name: Run tests
         run: go test ./...
 
+      - name: Build sandbox binaries
+        run: |
+          set -euo pipefail
+          dist="dist"
+          rm -rf "${dist}"
+          mkdir -p "${dist}"
+          platforms=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+          for platform in "${platforms[@]}"; do
+            read -r GOOS GOARCH <<<"${platform}"
+            build_dir="${dist}/${GOOS}_${GOARCH}"
+            mkdir -p "${build_dir}"
+            bin_name="ratio1-sandbox"
+            ext=""
+            archive_ext="tar.gz"
+            if [ "${GOOS}" = "windows" ]; then
+              ext=".exe"
+              archive_ext="zip"
+            fi
+            echo "building ${bin_name}${ext} for ${GOOS}/${GOARCH}"
+            GOOS="${GOOS}" GOARCH="${GOARCH}" CGO_ENABLED=0 \
+              go build -ldflags="-s -w" -o "${build_dir}/${bin_name}${ext}" ./cmd/ratio1-sandbox
+            if [ "${archive_ext}" = "zip" ]; then
+              (cd "${build_dir}" && zip -q "../${bin_name}_${GOOS}_${GOARCH}.zip" "${bin_name}${ext}")
+            else
+              (cd "${build_dir}" && tar -czf "../${bin_name}_${GOOS}_${GOARCH}.tar.gz" "${bin_name}${ext}")
+            fi
+            rm -rf "${build_dir}"
+          done
+
       - name: Generate Semantic Version
         id: version
         uses: PaulHatch/semantic-version@v5.4.0
@@ -42,5 +77,6 @@ jobs:
           name: v${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
+          files: dist/*.tar.gz,dist/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
