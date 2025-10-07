@@ -51,25 +51,44 @@ go run ./examples/basic_mock
 
 ### Sandbox server
 
-The sandbox wraps the in-memory mocks behind HTTP endpoints so you can exercise the SDK end-to-end.
+The sandbox wraps the in-memory mocks behind HTTP endpoints so you can exercise the SDK end-to-end without standing up the Python managers. Every time it starts, it prints export statements that you can paste into your shell to point the SDK at the sandbox.
+
+#### Download the release binary
+
+Each tagged release includes pre-built archives named `ratio1-sandbox_<os>_<arch>.<ext>` (`.tar.gz` for macOS/Linux, `.zip` for Windows). Grab the one for your platform and place the binary on your PATH:
 
 ```bash
-go run ./cmd/ratio1-sandbox --addr :8787
+# macOS arm64 example
+curl -L https://github.com/Ratio1/ratio1_sdk_go/releases/latest/download/ratio1-sandbox_darwin_arm64.tar.gz \
+  | tar -xz
+chmod +x ratio1-sandbox
+./ratio1-sandbox --addr :8787
+```
 
-# in another terminal
-export R1_RUNTIME_MODE=http
-export CSTORE_API_URL=http://localhost:8787
-export R1FS_API_URL=http://localhost:8787
+Windows users can download `ratio1-sandbox_windows_amd64.zip`, unzip it, and run `ratio1-sandbox.exe`.
 
+Copy the `export` lines that the server prints into your shell (or redirect them into a file and `source` it) and then run your application or the examples:
+
+```bash
 go run ./examples/basic_http
 ```
 
-Flags:
+#### Run from source
 
-- `--kv-seed path.json`
-- `--fs-seed path.json`
-- `--latency 200ms`
-- `--fail rate=0.05,code=500`
+If you prefer to rebuild locally:
+
+```bash
+go run ./cmd/ratio1-sandbox --addr :8787
+```
+
+#### Flags and behaviours
+
+- `--kv-seed path.json` – seed initial CStore keys.
+- `--fs-seed path.json` – seed initial R1FS files.
+- `--latency 200ms` – inject fixed latency before every request.
+- `--fail rate=0.05,code=500` – randomly inject HTTP failures.
+
+The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (`/set`, `/get`, `/get_status` for CStore; `/add_file_base64`, `/get_file_base64`, `/get_status_r1fs` for R1FS). Point both `CSTORE_API_URL` and `R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
 
 ## Usage snippets
 
@@ -137,6 +156,7 @@ make tidy       # go mod tidy
 make build      # go build ./...
 make test       # go test ./...
 make sandbox    # go run ./cmd/ratio1-sandbox
+make sandbox-dist  # build dist/ratio1-sandbox_<os>_<arch>.tar.gz for release uploads
 make tag VERSION=v0.1.0
 ```
 
