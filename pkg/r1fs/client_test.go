@@ -47,21 +47,25 @@ func TestUploadAndDownload(t *testing.T) {
 			mu.Unlock()
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"cid": cid})
+			res := struct {
+				Result struct {
+					Cid string `json:"cid"`
+				} `json:"result"`
+			}{}
+			res.Result.Cid = cid
+			json.NewEncoder(w).Encode(res)
 
 		case "/get_file_base64":
 			defer r.Body.Close()
 			var req struct {
-				Result struct {
-					CID string `json:"cid"`
-				} `json:"result"`
+				CID string `json:"cid"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			mu.Lock()
-			payload, ok := data[req.Result.CID]
+			payload, ok := data[req.CID]
 			mu.Unlock()
 			if !ok {
 				http.Error(w, "not found", http.StatusNotFound)
