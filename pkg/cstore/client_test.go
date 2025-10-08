@@ -61,7 +61,13 @@ func TestClientPutGetAndList(t *testing.T) {
 			mu.Unlock()
 			sort.Strings(keys)
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"keys": keys})
+			result := struct {
+				Result struct {
+					Keys []string `json:"keys"`
+				} `json:"result"`
+			}{}
+			result.Result.Keys = keys
+			json.NewEncoder(w).Encode(result)
 		default:
 			http.NotFound(w, r)
 		}

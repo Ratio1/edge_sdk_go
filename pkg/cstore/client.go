@@ -327,10 +327,12 @@ func (b *httpBackend) ListKeys(ctx context.Context) ([]string, error) {
 		return nil, nil
 	}
 	var payload struct {
-		Keys []string `json:"keys"`
+		Result struct {
+			Keys []string `json:"keys"`
+		} `json:"result"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, fmt.Errorf("cstore: decode get_status response: %w", err)
 	}
-	return payload.Keys, nil
+	return payload.Result.Keys, nil
 }
