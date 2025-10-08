@@ -47,7 +47,13 @@ func TestUploadAndDownload(t *testing.T) {
 			mu.Unlock()
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"cid": cid})
+			res := struct {
+				Result struct {
+					Cid string `json:"cid"`
+				} `json:"result"`
+			}{}
+			res.Result.Cid = cid
+			json.NewEncoder(w).Encode(res)
 
 		case "/get_file_base64":
 			defer r.Body.Close()
