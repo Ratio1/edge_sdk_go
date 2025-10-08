@@ -33,8 +33,8 @@ func TestNewFromEnvHTTPMode(t *testing.T) {
 	defer srv.Close()
 
 	t.Setenv("R1_RUNTIME_MODE", "http")
-	t.Setenv("CSTORE_API_URL", srv.URL)
-	t.Setenv("R1FS_API_URL", srv.URL)
+	t.Setenv("EE_CHAINSTORE_API_URL", srv.URL)
+	t.Setenv("EE_R1FS_API_URL", srv.URL)
 
 	cs, fs, mode, err := ratio1_sdk.NewFromEnv()
 	if err != nil {
@@ -50,8 +50,8 @@ func TestNewFromEnvHTTPMode(t *testing.T) {
 
 func TestNewFromEnvMockAutoFallback(t *testing.T) {
 	t.Setenv("R1_RUNTIME_MODE", "")
-	t.Setenv("CSTORE_API_URL", "")
-	t.Setenv("R1FS_API_URL", "")
+	t.Setenv("EE_CHAINSTORE_API_URL", "")
+	t.Setenv("EE_R1FS_API_URL", "")
 
 	cs, _, mode, err := ratio1_sdk.NewFromEnv()
 	if err != nil {
