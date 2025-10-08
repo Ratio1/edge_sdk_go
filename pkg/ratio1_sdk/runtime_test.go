@@ -49,7 +49,7 @@ func TestNewFromEnvHTTPMode(t *testing.T) {
 }
 
 func TestNewFromEnvMockAutoFallback(t *testing.T) {
-	t.Setenv("R1_RUNTIME_MODE", "")
+	t.Setenv("R1_RUNTIME_MODE", "auto")
 	t.Setenv("EE_CHAINSTORE_API_URL", "")
 	t.Setenv("EE_R1FS_API_URL", "")
 
