@@ -22,8 +22,8 @@ go get github.com/Ratio1/ratio1_sdk_go
 
 | Variable | Meaning |
 | --- | --- |
-| `CSTORE_API_URL` | Base URL for the CStore REST manager. |
-| `R1FS_API_URL` | Base URL for the R1FS REST manager. |
+| `EE_CHAINSTORE_API_URL` | Base URL for the CStore REST manager. |
+| `EE_R1FS_API_URL` | Base URL for the R1FS REST manager. |
 | `R1_RUNTIME_MODE` | `auto` (default), `http`, or `mock`. `auto` picks `http` when both URLs are set, otherwise `mock`. |
 | `R1_MOCK_CSTORE_SEED` | Optional JSON file with initial key/value pairs for mock mode. |
 | `R1_MOCK_R1FS_SEED` | Optional JSON file with initial file definitions for mock mode. |
@@ -34,8 +34,8 @@ go get github.com/Ratio1/ratio1_sdk_go
 
 ```bash
 export R1_RUNTIME_MODE=http
-export CSTORE_API_URL=https://example-node/cstore
-export R1FS_API_URL=https://example-node/r1fs
+export EE_CHAINSTORE_API_URL=https://example-node/cstore
+export EE_R1FS_API_URL=https://example-node/r1fs
 
 go run ./examples/basic_http
 ```
@@ -43,7 +43,7 @@ go run ./examples/basic_http
 ### Mock mode
 
 ```bash
-unset CSTORE_API_URL R1FS_API_URL
+unset EE_CHAINSTORE_API_URL EE_R1FS_API_URL
 export R1_RUNTIME_MODE=mock
 
 go run ./examples/basic_mock
@@ -88,7 +88,7 @@ go run ./cmd/ratio1-sandbox --addr :8787
 - `--latency 200ms` – inject fixed latency before every request.
 - `--fail rate=0.05,code=500` – randomly inject HTTP failures.
 
-The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (`/set`, `/get`, `/get_status` for CStore; `/add_file_base64`, `/get_file_base64`, `/get_status_r1fs` for R1FS). Point both `CSTORE_API_URL` and `R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
+The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (`/set`, `/get`, `/get_status` for CStore; `/add_file_base64`, `/get_file_base64`, `/get_status_r1fs` for R1FS). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
 
 ## Usage snippets
 

@@ -3,7 +3,7 @@
 - REST APIs sourced from Ratio1/edge_node:
   - https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py
   - https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py
-- Runtime modes: `auto`, `http`, `mock` determined by `R1_RUNTIME_MODE`, `CSTORE_API_URL`, `R1FS_API_URL`.
+- Runtime modes: `auto`, `http`, `mock` determined by `R1_RUNTIME_MODE`, `EE_CHAINSTORE_API_URL`, `EE_R1FS_API_URL`.
 - Optional mock seeds via `R1_MOCK_CSTORE_SEED`, `R1_MOCK_R1FS_SEED`.
 
 # Roles

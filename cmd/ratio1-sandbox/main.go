@@ -25,8 +25,8 @@ type failConfig struct {
 }
 
 const (
-	cstoreURLEnv = "CSTORE_API_URL"
-	r1fsURLEnv   = "R1FS_API_URL"
+	cstoreURLEnv = "EE_CHAINSTORE_API_URL"
+	r1fsURLEnv   = "EE_R1FS_API_URL"
 )
 
 func main() {

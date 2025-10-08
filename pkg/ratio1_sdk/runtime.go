@@ -18,8 +18,8 @@ import (
 
 const (
 	envMode            = "R1_RUNTIME_MODE"
-	envCStoreURL       = "CSTORE_API_URL"
-	envR1FSURL         = "R1FS_API_URL"
+	envCStoreURL       = "EE_CHAINSTORE_API_URL"
+	envR1FSURL         = "EE_R1FS_API_URL"
 	envMockCStoreSeed  = "R1_MOCK_CSTORE_SEED"
 	envMockR1FSSeed    = "R1_MOCK_R1FS_SEED"
 	defaultRuntimeMode = "auto"
