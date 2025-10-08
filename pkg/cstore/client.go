@@ -192,8 +192,17 @@ func decodeItem[T any](key string, data []byte) (*Item[T], error) {
 		return nil, nil
 	}
 
+	result := struct {
+		Result string `json:"result"`
+	}{}
+
+	err := json.Unmarshal(trimmed, &result)
+	if err != nil {
+		return nil, err
+	}
+
 	var str string
-	if err := json.Unmarshal(trimmed, &str); err == nil {
+	if err := json.Unmarshal([]byte(result.Result), &str); err == nil {
 		var value T
 		if err := json.Unmarshal([]byte(str), &value); err != nil {
 			if assignString(&value, str) {

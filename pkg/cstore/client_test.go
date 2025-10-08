@@ -50,8 +50,10 @@ func TestClientPutGetAndList(t *testing.T) {
 				io.WriteString(w, "null")
 				return
 			}
-			// The upstream FastAPI implementation returns the stored string.
-			io.WriteString(w, strconv.Quote(value))
+			result := struct {
+				Result string `json:"result"`
+			}{Result: strconv.Quote(value)}
+			json.NewEncoder(w).Encode(result)
 		case "/get_status":
 			mu.Lock()
 			keys := make([]string, 0, len(store))
