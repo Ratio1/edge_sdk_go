@@ -17,14 +17,14 @@ import (
 )
 
 const (
-	envMode            = "R1_RUNTIME_MODE"
-	envCStoreURL       = "EE_CHAINSTORE_API_URL"
-	envR1FSURL         = "EE_R1FS_API_URL"
-	envMockCStoreSeed  = "R1_MOCK_CSTORE_SEED"
-	envMockR1FSSeed    = "R1_MOCK_R1FS_SEED"
-	defaultRuntimeMode = "auto"
-	modeHTTP           = "http"
-	modeMock           = "mock"
+	envMode           = "R1_RUNTIME_MODE"
+	envCStoreURL      = "EE_CHAINSTORE_API_URL"
+	envR1FSURL        = "EE_R1FS_API_URL"
+	envMockCStoreSeed = "R1_MOCK_CSTORE_SEED"
+	envMockR1FSSeed   = "R1_MOCK_R1FS_SEED"
+	modeAuto          = "auto"
+	modeHTTP          = "http"
+	modeMock          = "mock"
 )
 
 // NewFromEnv initialises CStore and R1FS clients based on environment
@@ -32,15 +32,11 @@ const (
 // ("http" or "mock").
 func NewFromEnv() (*cstore.Client, *r1fs.Client, string, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv(envMode)))
-	if mode == "" {
-		mode = defaultRuntimeMode
-	}
-
 	cstoreURL := strings.TrimSpace(os.Getenv(envCStoreURL))
 	r1fsURL := strings.TrimSpace(os.Getenv(envR1FSURL))
 
 	switch mode {
-	case defaultRuntimeMode:
+	case modeAuto:
 		if cstoreURL != "" && r1fsURL != "" {
 			return newHTTPClients(cstoreURL, r1fsURL)
 		}

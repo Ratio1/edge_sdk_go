@@ -22,9 +22,9 @@ go get github.com/Ratio1/ratio1_sdk_go
 
 | Variable | Meaning |
 | --- | --- |
-| `EE_CHAINSTORE_API_URL` | Base URL for the CStore REST manager. |
-| `EE_R1FS_API_URL` | Base URL for the R1FS REST manager. |
-| `R1_RUNTIME_MODE` | `auto` (default), `http`, or `mock`. `auto` picks `http` when both URLs are set, otherwise `mock`. |
+| `EE_CHAINSTORE_API_URL` | Base URL for the CStore REST manager. Already available on Ratio1 nodes. |
+| `EE_R1FS_API_URL` | Base URL for the R1FS REST manager. Already available on Ratio1 nodes. | 
+| `R1_RUNTIME_MODE` | `auto`, `http`, or `mock`. `auto` picks `http` when both URLs are set, otherwise `mock`. |
 | `R1_MOCK_CSTORE_SEED` | Optional JSON file with initial key/value pairs for mock mode. |
 | `R1_MOCK_R1FS_SEED` | Optional JSON file with initial file definitions for mock mode. |
 
