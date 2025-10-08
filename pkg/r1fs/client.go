@@ -168,17 +168,19 @@ func (b *httpBackend) Upload(ctx context.Context, path string, data []byte, size
 	if err != nil {
 		return nil, err
 	}
-	var result struct {
-		CID string `json:"cid"`
+	var response struct {
+		Result struct {
+			CID string `json:"cid"`
+		} `json:"result"`
 	}
-	if err := json.Unmarshal(payloadBytes, &result); err != nil {
+	if err := json.Unmarshal(payloadBytes, &response); err != nil {
 		return nil, fmt.Errorf("r1fs: decode add_file_base64 response: %w", err)
 	}
-	if strings.TrimSpace(result.CID) == "" {
+	if strings.TrimSpace(response.Result.CID) == "" {
 		return nil, fmt.Errorf("r1fs: missing cid in response")
 	}
 	stat := &FileStat{
-		Path:        result.CID,
+		Path:        response.Result.CID,
 		Size:        chooseSize(size, int64(len(data))),
 		ContentType: "",
 		Metadata:    copyMap(opts),
