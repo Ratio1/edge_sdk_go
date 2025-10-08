@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
@@ -143,7 +142,7 @@ func (b *httpBackend) Upload(ctx context.Context, path string, data []byte, size
 	}
 	body := map[string]any{
 		"file_base64_str": base64.StdEncoding.EncodeToString(data),
-		"filename":        filepath.Base(path),
+		"filename":        path,
 	}
 	if opts != nil && opts.Secret != "" {
 		body["secret"] = opts.Secret

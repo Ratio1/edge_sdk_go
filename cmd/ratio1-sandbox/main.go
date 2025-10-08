@@ -217,7 +217,7 @@ func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 	if filename == "" {
 		filename = fmt.Sprintf("file-%d.bin", time.Now().UnixNano())
 	}
-	stat, err := fs.Upload(r.Context(), "/"+filename, bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: http.DetectContentType(data)})
+	stat, err := fs.Upload(r.Context(), filename, bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: http.DetectContentType(data)})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
