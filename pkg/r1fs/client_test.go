@@ -52,14 +52,16 @@ func TestUploadAndDownload(t *testing.T) {
 		case "/get_file_base64":
 			defer r.Body.Close()
 			var req struct {
-				CID string `json:"cid"`
+				Result struct {
+					CID string `json:"cid"`
+				} `json:"result"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			mu.Lock()
-			payload, ok := data[req.CID]
+			payload, ok := data[req.Result.CID]
 			mu.Unlock()
 			if !ok {
 				http.Error(w, "not found", http.StatusNotFound)
