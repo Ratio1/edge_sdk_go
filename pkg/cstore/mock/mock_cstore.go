@@ -27,9 +27,10 @@ func (e *entry) expired(now time.Time) bool {
 
 // Mock implements an in-memory CStore replacement with TTL and ETag semantics.
 type Mock struct {
-	mu    sync.RWMutex
-	items map[string]*entry
-	now   func() time.Time
+	mu     sync.RWMutex
+	items  map[string]*entry
+	hashes map[string]map[string]*entry
+	now    func() time.Time
 }
 
 // Option configures the mock instance.
@@ -47,7 +48,8 @@ func WithClock(fn func() time.Time) Option {
 // New creates an empty mock store.
 func New(opts ...Option) *Mock {
 	m := &Mock{
-		items: make(map[string]*entry),
+		items:  make(map[string]*entry),
+		hashes: make(map[string]map[string]*entry),
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -105,6 +107,21 @@ func Put[T any](ctx context.Context, store *Mock, key string, value T, opts *cst
 // List enumerates keys matching the prefix.
 func List[T any](ctx context.Context, store *Mock, prefix string, cursor string, limit int) (*cstore.ListResult[T], error) {
 	return listItems[T](ctx, store, prefix, cursor, limit)
+}
+
+// HGet retrieves a hash field decoded into T.
+func HGet[T any](ctx context.Context, store *Mock, hashKey, field string) (*cstore.HashItem[T], error) {
+	return getHashItem[T](ctx, store, hashKey, field)
+}
+
+// HSet writes a hash field and returns the stored item.
+func HSet[T any](ctx context.Context, store *Mock, hashKey, field string, value T, opts *cstore.PutOptions) (*cstore.HashItem[T], error) {
+	return putHashItem(ctx, store, hashKey, field, value, opts)
+}
+
+// HGetAll retrieves all hash fields for a hash key.
+func HGetAll[T any](ctx context.Context, store *Mock, hashKey string) ([]cstore.HashItem[T], error) {
+	return listHashItems[T](ctx, store, hashKey)
 }
 
 func getItem[T any](ctx context.Context, store *Mock, key string) (*cstore.Item[T], error) {
@@ -294,4 +311,175 @@ func newETag() string {
 		panic(err)
 	}
 	return hex.EncodeToString(buf[:])
+}
+
+func getHashItem[T any](ctx context.Context, store *Mock, hashKey, field string) (*cstore.HashItem[T], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("mock cstore: hash key is required")
+	}
+	if strings.TrimSpace(field) == "" {
+		return nil, fmt.Errorf("mock cstore: hash field is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	bucket := store.hashes[hashKey]
+	if bucket == nil {
+		return nil, nil
+	}
+	ent, ok := bucket[field]
+	if !ok {
+		return nil, nil
+	}
+	now := store.clock()
+	if ent.expired(now) {
+		delete(bucket, field)
+		if len(bucket) == 0 {
+			delete(store.hashes, hashKey)
+		}
+		return nil, nil
+	}
+
+	var value T
+	if err := json.Unmarshal(ent.data, &value); err != nil {
+		return nil, fmt.Errorf("mock cstore: decode hash value: %w", err)
+	}
+
+	var expiresPtr *time.Time
+	if !ent.expiresAt.IsZero() {
+		expires := ent.expiresAt
+		expiresPtr = &expires
+	}
+	return &cstore.HashItem[T]{
+		HashKey:   hashKey,
+		Field:     field,
+		Value:     value,
+		ETag:      ent.etag,
+		ExpiresAt: expiresPtr,
+	}, nil
+}
+
+func putHashItem[T any](ctx context.Context, store *Mock, hashKey, field string, value T, opts *cstore.PutOptions) (*cstore.HashItem[T], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("mock cstore: hash key is required")
+	}
+	if strings.TrimSpace(field) == "" {
+		return nil, fmt.Errorf("mock cstore: hash field is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("mock cstore: encode hash value: %w", err)
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	now := store.clock()
+	bucket := store.hashes[hashKey]
+	if bucket == nil {
+		bucket = make(map[string]*entry)
+		store.hashes[hashKey] = bucket
+	}
+	ent, exists := bucket[field]
+	if exists && ent.expired(now) {
+		delete(bucket, field)
+		exists = false
+	}
+
+	if opts != nil {
+		if opts.IfAbsent && exists {
+			return nil, cstore.ErrPreconditionFailed
+		}
+		if opts.IfETagMatch != "" {
+			if !exists || ent.etag != opts.IfETagMatch {
+				return nil, cstore.ErrPreconditionFailed
+			}
+		}
+	}
+
+	newEntry := &entry{
+		data: append([]byte(nil), payload...),
+		etag: newETag(),
+	}
+	if opts != nil && opts.TTLSeconds != nil && *opts.TTLSeconds > 0 {
+		newEntry.expiresAt = now.Add(time.Duration(*opts.TTLSeconds) * time.Second)
+	}
+	bucket[field] = newEntry
+
+	var expiresPtr *time.Time
+	if !newEntry.expiresAt.IsZero() {
+		expires := newEntry.expiresAt
+		expiresPtr = &expires
+	}
+	return &cstore.HashItem[T]{
+		HashKey:   hashKey,
+		Field:     field,
+		Value:     value,
+		ETag:      newEntry.etag,
+		ExpiresAt: expiresPtr,
+	}, nil
+}
+
+func listHashItems[T any](ctx context.Context, store *Mock, hashKey string) ([]cstore.HashItem[T], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("mock cstore: hash key is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	bucket := store.hashes[hashKey]
+	if bucket == nil {
+		return nil, nil
+	}
+
+	now := store.clock()
+	fields := make([]string, 0, len(bucket))
+	for field, ent := range bucket {
+		if ent.expired(now) {
+			delete(bucket, field)
+			continue
+		}
+		fields = append(fields, field)
+	}
+	if len(bucket) == 0 {
+		delete(store.hashes, hashKey)
+	}
+	if len(fields) == 0 {
+		return nil, nil
+	}
+	sort.Strings(fields)
+
+	items := make([]cstore.HashItem[T], 0, len(fields))
+	for _, field := range fields {
+		ent := bucket[field]
+		var value T
+		if err := json.Unmarshal(ent.data, &value); err != nil {
+			return nil, fmt.Errorf("mock cstore: decode hash value: %w", err)
+		}
+		var expiresPtr *time.Time
+		if !ent.expiresAt.IsZero() {
+			expires := ent.expiresAt
+			expiresPtr = &expires
+		}
+		items = append(items, cstore.HashItem[T]{
+			HashKey:   hashKey,
+			Field:     field,
+			Value:     value,
+			ETag:      ent.etag,
+			ExpiresAt: expiresPtr,
+		})
+	}
+	return items, nil
 }

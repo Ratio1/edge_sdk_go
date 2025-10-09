@@ -132,6 +132,50 @@ func (b *cstoreMockBackend) ListKeys(ctx context.Context) ([]string, error) {
 	return keys, nil
 }
 
+func (b *cstoreMockBackend) HGetRaw(ctx context.Context, hashKey, field string) ([]byte, error) {
+	item, err := cstoremock.HGet[json.RawMessage](ctx, b.store, hashKey, field)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return []byte("null"), nil
+	}
+	return append([]byte(nil), item.Value...), nil
+}
+
+func (b *cstoreMockBackend) HSetRaw(ctx context.Context, hashKey, field string, raw []byte, opts *cstore.PutOptions) (*cstore.HashItem[json.RawMessage], error) {
+	item, err := cstoremock.HSet(ctx, b.store, hashKey, field, json.RawMessage(raw), opts)
+	if err != nil {
+		return nil, err
+	}
+	return &cstore.HashItem[json.RawMessage]{
+		HashKey:   item.HashKey,
+		Field:     item.Field,
+		Value:     append([]byte(nil), item.Value...),
+		ETag:      item.ETag,
+		ExpiresAt: item.ExpiresAt,
+	}, nil
+}
+
+func (b *cstoreMockBackend) HGetAllRaw(ctx context.Context, hashKey string) ([]byte, error) {
+	items, err := cstoremock.HGetAll[json.RawMessage](ctx, b.store, hashKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return []byte("null"), nil
+	}
+	payload := make(map[string]json.RawMessage, len(items))
+	for _, item := range items {
+		payload[item.Field] = append([]byte(nil), item.Value...)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 type r1fsMockBackend struct {
 	store *r1fsmock.Mock
 }

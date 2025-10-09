@@ -21,6 +21,7 @@ type counter struct {
 
 func TestClientPutGetAndList(t *testing.T) {
 	store := map[string]string{}
+	hashStore := map[string]map[string]string{}
 	var mu sync.Mutex
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +54,68 @@ func TestClientPutGetAndList(t *testing.T) {
 			result := struct {
 				Result string `json:"result"`
 			}{Result: strconv.Quote(value)}
+			json.NewEncoder(w).Encode(result)
+		case "/hset":
+			defer r.Body.Close()
+			var payload struct {
+				HashKey string `json:"hkey"`
+				Key     string `json:"key"`
+				Value   string `json:"value"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			bucket := hashStore[payload.HashKey]
+			if bucket == nil {
+				bucket = make(map[string]string)
+				hashStore[payload.HashKey] = bucket
+			}
+			bucket[payload.Key] = payload.Value
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, "true")
+		case "/hget":
+			hkey := r.URL.Query().Get("hkey")
+			key := r.URL.Query().Get("key")
+			mu.Lock()
+			bucket := hashStore[hkey]
+			var (
+				value string
+				ok    bool
+			)
+			if bucket != nil {
+				value, ok = bucket[key]
+			}
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if !ok {
+				io.WriteString(w, "null")
+				return
+			}
+			result := struct {
+				Result string `json:"result"`
+			}{Result: strconv.Quote(value)}
+			json.NewEncoder(w).Encode(result)
+		case "/hgetall":
+			hkey := r.URL.Query().Get("hkey")
+			mu.Lock()
+			bucket := hashStore[hkey]
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if bucket == nil || len(bucket) == 0 {
+				io.WriteString(w, "null")
+				return
+			}
+			fields := make(map[string]json.RawMessage, len(bucket))
+			for k, v := range bucket {
+				fields[k] = json.RawMessage([]byte(v))
+			}
+			raw, _ := json.Marshal(fields)
+			result := struct {
+				Result string `json:"result"`
+			}{Result: string(raw)}
 			json.NewEncoder(w).Encode(result)
 		case "/get_status":
 			mu.Lock()
@@ -89,6 +152,10 @@ func TestClientPutGetAndList(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
+	if _, err := cstore.HSet(ctx, client, "jobs", "123", counter{Count: 3}, nil); err != nil {
+		t.Fatalf("HSet: %v", err)
+	}
+
 	item, err := cstore.Get[counter](ctx, client, "jobs:123")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -103,6 +170,36 @@ func TestClientPutGetAndList(t *testing.T) {
 	}
 	if missing != nil {
 		t.Fatalf("expected nil for missing key, got %#v", missing)
+	}
+
+	hItem, err := cstore.HGet[counter](ctx, client, "jobs", "123")
+	if err != nil {
+		t.Fatalf("HGet: %v", err)
+	}
+	if hItem == nil || hItem.Value.Count != 3 || hItem.HashKey != "jobs" || hItem.Field != "123" {
+		t.Fatalf("HGet returned unexpected item: %#v", hItem)
+	}
+	hMissing, err := cstore.HGet[counter](ctx, client, "jobs", "999")
+	if err != nil {
+		t.Fatalf("HGet missing: %v", err)
+	}
+	if hMissing != nil {
+		t.Fatalf("expected nil for missing hash field, got %#v", hMissing)
+	}
+
+	all, err := cstore.HGetAll[counter](ctx, client, "jobs")
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	if len(all) != 1 || all[0].Value.Count != 3 || all[0].Field != "123" {
+		t.Fatalf("HGetAll returned unexpected items: %#v", all)
+	}
+	emptyAll, err := cstore.HGetAll[counter](ctx, client, "missing-hash")
+	if err != nil {
+		t.Fatalf("HGetAll missing: %v", err)
+	}
+	if emptyAll != nil {
+		t.Fatalf("expected nil for missing hash, got %#v", emptyAll)
 	}
 
 	result, err := cstore.List[counter](ctx, client, "jobs:", "", 1)
