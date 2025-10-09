@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
+	"github.com/Ratio1/ratio1_sdk_go/internal/ratio1api"
 )
 
 // Client provides HTTP access to the R1FS manager API.
@@ -169,18 +170,16 @@ func (b *httpBackend) Upload(ctx context.Context, path string, data []byte, size
 		return nil, err
 	}
 	var response struct {
-		Result struct {
-			CID string `json:"cid"`
-		} `json:"result"`
+		CID string `json:"cid"`
 	}
-	if err := json.Unmarshal(payloadBytes, &response); err != nil {
+	if err := ratio1api.DecodeResult(payloadBytes, &response); err != nil {
 		return nil, fmt.Errorf("r1fs: decode add_file_base64 response: %w", err)
 	}
-	if strings.TrimSpace(response.Result.CID) == "" {
+	if strings.TrimSpace(response.CID) == "" {
 		return nil, fmt.Errorf("r1fs: missing cid in response")
 	}
 	stat := &FileStat{
-		Path:        response.Result.CID,
+		Path:        response.CID,
 		Size:        chooseSize(size, int64(len(data))),
 		ContentType: "",
 		Metadata:    copyMap(opts),
@@ -222,7 +221,7 @@ func (b *httpBackend) Download(ctx context.Context, path string) ([]byte, error)
 	var result struct {
 		FileBase64 string `json:"file_base64_str"`
 	}
-	if err := json.Unmarshal(payloadBytes, &result); err != nil {
+	if err := ratio1api.DecodeResult(payloadBytes, &result); err != nil {
 		return nil, fmt.Errorf("r1fs: decode get_file_base64 response: %w", err)
 	}
 	data, err := base64.StdEncoding.DecodeString(result.FileBase64)

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
+	"github.com/Ratio1/ratio1_sdk_go/internal/ratio1api"
 )
 
 // Client provides access to the upstream CStore REST API.
@@ -192,40 +193,11 @@ func decodeItem[T any](key string, data []byte) (*Item[T], error) {
 		return nil, nil
 	}
 
-	result := struct {
-		Result string `json:"result"`
-	}{}
-
-	err := json.Unmarshal(trimmed, &result)
-	if err != nil {
-		return nil, err
-	}
-
-	var str string
-	if err := json.Unmarshal([]byte(result.Result), &str); err == nil {
-		var value T
-		if err := json.Unmarshal([]byte(str), &value); err != nil {
-			if assignString(&value, str) {
-				return &Item[T]{Key: key, Value: value}, nil
-			}
-			return nil, fmt.Errorf("cstore: decode JSON payload: %w", err)
-		}
-		return &Item[T]{Key: key, Value: value}, nil
-	}
-
 	var value T
 	if err := json.Unmarshal(trimmed, &value); err != nil {
 		return nil, fmt.Errorf("cstore: decode value: %w", err)
 	}
 	return &Item[T]{Key: key, Value: value}, nil
-}
-
-func assignString[T any](ptr *T, value string) bool {
-	if strPtr, ok := any(ptr).(*string); ok {
-		*strPtr = value
-		return true
-	}
-	return false
 }
 
 func validatePutOptions(opts *PutOptions) error {
@@ -285,7 +257,18 @@ func (b *httpBackend) GetRaw(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return httpx.ReadAllAndClose(resp.Body)
+	data, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := ratio1api.ExtractResult(data)
+	if err != nil {
+		return nil, err
+	}
+	if payload == nil {
+		return nil, nil
+	}
+	return payload, nil
 }
 
 func (b *httpBackend) PutRaw(ctx context.Context, key string, raw []byte, opts *PutOptions) (*Item[json.RawMessage], error) {
@@ -332,16 +315,11 @@ func (b *httpBackend) ListKeys(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, nil
-	}
 	var payload struct {
-		Result struct {
-			Keys []string `json:"keys"`
-		} `json:"result"`
+		Keys []string `json:"keys"`
 	}
-	if err := json.Unmarshal(data, &payload); err != nil {
+	if err := ratio1api.DecodeResult(data, &payload); err != nil {
 		return nil, fmt.Errorf("cstore: decode get_status response: %w", err)
 	}
-	return payload.Result.Keys, nil
+	return payload.Keys, nil
 }
