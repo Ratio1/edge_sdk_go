@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -102,5 +103,53 @@ func TestMockSeed(t *testing.T) {
 	}
 	if stat.ContentType != "text/plain" {
 		t.Fatalf("unexpected content type: %#v", stat)
+	}
+}
+
+func TestMockAddFileAndYAML(t *testing.T) {
+	m := mock.New()
+	ctx := context.Background()
+
+	fileData := []byte("stream data")
+	stat, err := m.AddFile(ctx, "stream.txt", fileData, int64(len(fileData)), nil)
+	if err != nil {
+		t.Fatalf("AddFile: %v", err)
+	}
+	if stat.Path == "" {
+		t.Fatalf("AddFile returned empty path")
+	}
+
+	loc, err := m.GetFile(ctx, stat.Path, "")
+	if err != nil {
+		t.Fatalf("GetFile: %v", err)
+	}
+	if loc.Filename != "stream.txt" || loc.Path == "" {
+		t.Fatalf("unexpected file location: %#v", loc)
+	}
+
+	yamlCID, err := m.AddYAML(ctx, map[string]string{"hello": "world"}, "config.yaml", "")
+	if err != nil {
+		t.Fatalf("AddYAML: %v", err)
+	}
+	payload, err := m.GetYAML(ctx, yamlCID, "")
+	if err != nil {
+		t.Fatalf("GetYAML: %v", err)
+	}
+	var doc struct {
+		FileData map[string]string `json:"file_data"`
+	}
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		t.Fatalf("decode yaml response: %v", err)
+	}
+	if doc.FileData["hello"] != "world" {
+		t.Fatalf("unexpected yaml data: %#v", doc)
+	}
+
+	missing, err := m.GetYAML(ctx, "missing", "")
+	if err != nil {
+		t.Fatalf("GetYAML missing: %v", err)
+	}
+	if string(missing) != "\"error\"" {
+		t.Fatalf("expected error response, got %s", string(missing))
 	}
 }

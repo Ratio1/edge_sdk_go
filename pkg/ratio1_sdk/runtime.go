@@ -192,6 +192,22 @@ func (b *r1fsMockBackend) Download(ctx context.Context, path string) ([]byte, er
 	return buf.Bytes(), nil
 }
 
+func (b *r1fsMockBackend) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *r1fs.UploadOptions) (*r1fs.FileStat, error) {
+	return b.store.AddFile(ctx, filename, data, size, opts)
+}
+
+func (b *r1fsMockBackend) GetFile(ctx context.Context, cid string, secret string) (*r1fs.FileLocation, error) {
+	return b.store.GetFile(ctx, cid, secret)
+}
+
+func (b *r1fsMockBackend) AddYAML(ctx context.Context, data any, filename string, secret string) (string, error) {
+	return b.store.AddYAML(ctx, data, filename, secret)
+}
+
+func (b *r1fsMockBackend) GetYAML(ctx context.Context, cid string, secret string) ([]byte, error) {
+	return b.store.GetYAML(ctx, cid, secret)
+}
+
 func (b *r1fsMockBackend) Stat(ctx context.Context, path string) (*r1fs.FileStat, error) {
 	return b.store.Stat(ctx, path)
 }

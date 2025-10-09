@@ -22,6 +22,25 @@ type UploadOptions struct {
 	Secret      string // TODO: align with upstream API once metadata headers are formalised.
 }
 
+// FileLocation describes the on-disk location reported by /get_file.
+type FileLocation struct {
+	Path     string
+	Filename string
+	Meta     map[string]any
+}
+
+// YAMLOptions controls additional parameters for YAML uploads.
+type YAMLOptions struct {
+	Filename string
+	Secret   string
+}
+
+// YAMLDocument captures YAML content decoded into the requested type.
+type YAMLDocument[T any] struct {
+	CID  string
+	Data T
+}
+
 // ListResult contains paginated listing results.
 type ListResult struct {
 	Files      []FileStat
