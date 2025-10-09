@@ -103,7 +103,6 @@ import (
 
 	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
 	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
-	"github.com/Ratio1/ratio1_sdk_go/pkg/ratio1_sdk"
 )
 
 type Counter struct {
@@ -112,11 +111,15 @@ type Counter struct {
 
 func main() {
 	ctx := context.Background()
-	cs, fs, mode, err := ratio1_sdk.NewFromEnv()
+	cs, cMode, err := cstore.NewFromEnv()
 	if err != nil {
-		log.Fatalf("bootstrap clients: %v", err)
+		log.Fatalf("bootstrap cstore: %v", err)
 	}
-	fmt.Println("mode:", mode)
+	fs, fMode, err := r1fs.NewFromEnv()
+	if err != nil {
+		log.Fatalf("bootstrap r1fs: %v", err)
+	}
+	fmt.Println("modes:", cMode, fMode)
 
 	counter := Counter{Count: 1}
 	_, err = cstore.Put(ctx, cs, "jobs:123", counter, &cstore.PutOptions{})
@@ -145,9 +148,11 @@ func main() {
 	if _, err := fs.Download(ctx, stat.Path, &out); err != nil {
 		log.Fatalf("r1fs download: %v", err)
 	}
-	fmt.Printf("downloaded: %q\n", out.String())
+fmt.Printf("downloaded: %q\n", out.String())
 }
 ```
+
+> Prefer the per-package helpers `cstore.NewFromEnv` and `r1fs.NewFromEnv` to bootstrap clients. The legacy `ratio1_sdk.NewFromEnv` wrapper is still available if you want both handles at once.
 
 ## Development
 
