@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +15,7 @@ import (
 	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
 )
 
-func TestUploadAndDownload(t *testing.T) {
+func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 	var (
 		mu        sync.Mutex
 		data      = make(map[string][]byte)
@@ -192,21 +191,20 @@ func TestUploadAndDownload(t *testing.T) {
 
 	ctx := context.Background()
 	payload := strings.NewReader("hello world")
-	stat, err := client.Upload(ctx, "/tmp/hello.txt", payload, int64(payload.Len()), &r1fs.UploadOptions{ContentType: "text/plain"})
+	stat, err := client.AddFileBase64(ctx, "/tmp/hello.txt", payload, int64(payload.Len()), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
-		t.Fatalf("Upload: %v", err)
+		t.Fatalf("AddFileBase64: %v", err)
 	}
 	if stat == nil || stat.Path == "" {
-		t.Fatalf("Upload returned invalid stat: %#v", stat)
+		t.Fatalf("AddFileBase64 returned invalid stat: %#v", stat)
 	}
 
-	var buf strings.Builder
-	n, err := client.Download(ctx, stat.Path, &buf)
+	content, err := client.GetFileBase64(ctx, stat.Path, "")
 	if err != nil {
-		t.Fatalf("Download: %v", err)
+		t.Fatalf("GetFileBase64: %v", err)
 	}
-	if n != int64(len("hello world")) || buf.String() != "hello world" {
-		t.Fatalf("Download mismatch: n=%d buf=%q", n, buf.String())
+	if string(content) != "hello world" {
+		t.Fatalf("GetFileBase64 mismatch: %q", string(content))
 	}
 
 	streamPayload := strings.NewReader("stream upload")
@@ -243,21 +241,5 @@ func TestUploadAndDownload(t *testing.T) {
 	}
 	if _, err := client.GetYAML(ctx, "missing-yaml", "", nil); err == nil {
 		t.Fatalf("expected error for missing YAML document")
-	}
-}
-
-func TestUnsupportedOperations(t *testing.T) {
-	client, err := r1fs.New("mocked_test")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if _, err := client.Stat(context.Background(), "cid"); !errors.Is(err, r1fs.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature for Stat, got %v", err)
-	}
-	if _, err := client.List(context.Background(), "/", "", 10); !errors.Is(err, r1fs.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature for List, got %v", err)
-	}
-	if err := client.Delete(context.Background(), "cid"); !errors.Is(err, r1fs.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature for Delete, got %v", err)
 	}
 }

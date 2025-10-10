@@ -68,12 +68,12 @@ type mockBackend struct {
 	store *mockFS
 }
 
-func (b *mockBackend) Upload(ctx context.Context, path string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
-	return b.store.upload(ctx, path, data, size, opts)
+func (b *mockBackend) AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
+	return b.store.addFileBase64(ctx, filename, data, size, opts)
 }
 
-func (b *mockBackend) Download(ctx context.Context, path string) ([]byte, error) {
-	return b.store.download(ctx, path)
+func (b *mockBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error) {
+	return b.store.getFileBase64(ctx, cid, secret)
 }
 
 func (b *mockBackend) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
@@ -91,16 +91,4 @@ func (b *mockBackend) AddYAML(ctx context.Context, data any, filename string, se
 
 func (b *mockBackend) GetYAML(ctx context.Context, cid string, secret string) ([]byte, error) {
 	return b.store.getYAML(ctx, cid)
-}
-
-func (b *mockBackend) Stat(ctx context.Context, path string) (*FileStat, error) {
-	return b.store.stat(ctx, path)
-}
-
-func (b *mockBackend) List(ctx context.Context, dir string, cursor string, limit int) (*ListResult, error) {
-	return b.store.list(ctx, dir, cursor, limit)
-}
-
-func (b *mockBackend) Delete(ctx context.Context, path string) error {
-	return b.store.delete(ctx, path)
 }

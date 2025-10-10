@@ -40,11 +40,11 @@ func NewWithBackend(b Backend) *Client {
 	return &Client{backend: b}
 }
 
-// Upload writes data via /add_file_base64. The returned FileStat uses the CID
+// AddFileBase64 writes data via /add_file_base64. The returned FileStat uses the CID
 // reported by the upstream API as its Path field.
-func (c *Client) Upload(ctx context.Context, path string, data io.Reader, size int64, opts *UploadOptions) (*FileStat, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("r1fs: path is required")
+func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (*FileStat, error) {
+	if strings.TrimSpace(filename) == "" {
+		return nil, fmt.Errorf("r1fs: filename is required")
 	}
 	if c == nil || c.backend == nil {
 		return nil, fmt.Errorf("r1fs: client is nil")
@@ -53,7 +53,7 @@ func (c *Client) Upload(ctx context.Context, path string, data io.Reader, size i
 	if err != nil {
 		return nil, fmt.Errorf("r1fs: read upload payload: %w", err)
 	}
-	return c.backend.Upload(ctx, path, payload, size, opts)
+	return c.backend.AddFileBase64(ctx, filename, payload, size, opts)
 }
 
 // AddFile uploads data using the /add_file endpoint (multipart form upload).
@@ -71,20 +71,15 @@ func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, s
 	return c.backend.AddFile(ctx, filename, payload, size, opts)
 }
 
-// Download retrieves data via /get_file_base64 and streams decoded bytes into w.
-func (c *Client) Download(ctx context.Context, path string, w io.Writer) (int64, error) {
-	if strings.TrimSpace(path) == "" {
-		return 0, fmt.Errorf("r1fs: path is required")
+// GetFileBase64 retrieves and decodes data via /get_file_base64.
+func (c *Client) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error) {
+	if strings.TrimSpace(cid) == "" {
+		return nil, fmt.Errorf("r1fs: cid is required")
 	}
 	if c == nil || c.backend == nil {
-		return 0, fmt.Errorf("r1fs: client is nil")
+		return nil, fmt.Errorf("r1fs: client is nil")
 	}
-	data, err := c.backend.Download(ctx, path)
-	if err != nil {
-		return 0, err
-	}
-	n, err := w.Write(data)
-	return int64(n), err
+	return c.backend.GetFileBase64(ctx, cid, secret)
 }
 
 // GetFile resolves a CID to the on-disk path reported by /get_file.
@@ -144,30 +139,6 @@ func (c *Client) getYAMLRaw(ctx context.Context, cid string, secret string) ([]b
 		return nil, fmt.Errorf("r1fs: client is nil")
 	}
 	return c.backend.GetYAML(ctx, cid, secret)
-}
-
-// Stat is currently not exposed by the upstream API.
-func (c *Client) Stat(ctx context.Context, path string) (*FileStat, error) {
-	if c == nil || c.backend == nil {
-		return nil, fmt.Errorf("r1fs: client is nil")
-	}
-	return c.backend.Stat(ctx, path)
-}
-
-// List is currently not exposed by the upstream API.
-func (c *Client) List(ctx context.Context, dir string, cursor string, limit int) (*ListResult, error) {
-	if c == nil || c.backend == nil {
-		return nil, fmt.Errorf("r1fs: client is nil")
-	}
-	return c.backend.List(ctx, dir, cursor, limit)
-}
-
-// Delete is currently not exposed by the upstream API.
-func (c *Client) Delete(ctx context.Context, path string) error {
-	if c == nil || c.backend == nil {
-		return fmt.Errorf("r1fs: client is nil")
-	}
-	return c.backend.Delete(ctx, path)
 }
 
 func chooseSize(provided int64, actual int64) int64 {
@@ -244,31 +215,36 @@ func decodeYAMLDocument[T any](cid string, data []byte) (*YAMLDocument[T], error
 }
 
 type Backend interface {
-	Upload(ctx context.Context, path string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
-	Download(ctx context.Context, path string) ([]byte, error)
+	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
 	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
+	GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error)
 	GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error)
 	AddYAML(ctx context.Context, data any, filename string, secret string) (string, error)
 	GetYAML(ctx context.Context, cid string, secret string) ([]byte, error)
-	Stat(ctx context.Context, path string) (*FileStat, error)
-	List(ctx context.Context, dir string, cursor string, limit int) (*ListResult, error)
-	Delete(ctx context.Context, path string) error
 }
 
 type httpBackend struct {
 	client *httpx.Client
 }
 
-func (b *httpBackend) Upload(ctx context.Context, path string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
+func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := map[string]any{
 		"file_base64_str": base64.StdEncoding.EncodeToString(data),
-		"filename":        path,
+		"filename":        filename,
 	}
-	if opts != nil && opts.Secret != "" {
-		body["secret"] = opts.Secret
+	if opts != nil {
+		if opts.Secret != "" {
+			body["secret"] = opts.Secret
+		}
+		if len(opts.Metadata) > 0 {
+			body["metadata"] = opts.Metadata
+		}
+		if opts.ContentType != "" {
+			body["content_type"] = opts.ContentType
+		}
 	}
 	jsonBody, err := encodeJSON(body)
 	if err != nil {
@@ -389,12 +365,15 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 	return stat, nil
 }
 
-func (b *httpBackend) Download(ctx context.Context, path string) ([]byte, error) {
+func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := map[string]any{
-		"cid": path,
+		"cid": cid,
+	}
+	if strings.TrimSpace(secret) != "" {
+		body["secret"] = secret
 	}
 	jsonBody, err := encodeJSON(body)
 	if err != nil {
@@ -547,16 +526,4 @@ func (b *httpBackend) GetYAML(ctx context.Context, cid string, secret string) ([
 		return nil, nil
 	}
 	return data, nil
-}
-
-func (b *httpBackend) Stat(ctx context.Context, path string) (*FileStat, error) {
-	return nil, fmt.Errorf("%w: stat not available in r1fs_manager_api.py", ErrUnsupportedFeature)
-}
-
-func (b *httpBackend) List(ctx context.Context, dir string, cursor string, limit int) (*ListResult, error) {
-	return nil, fmt.Errorf("%w: list not available in r1fs_manager_api.py", ErrUnsupportedFeature)
-}
-
-func (b *httpBackend) Delete(ctx context.Context, path string) error {
-	return fmt.Errorf("%w: delete not available in r1fs_manager_api.py", ErrUnsupportedFeature)
 }

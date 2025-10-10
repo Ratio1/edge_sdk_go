@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -106,10 +105,10 @@ func (m *Mock) Seed(entries []devseed.R1FSSeedEntry) error {
 	return nil
 }
 
-// Upload stores file contents.
-func (m *Mock) Upload(ctx context.Context, path string, data io.Reader, size int64, opts *r1fs.UploadOptions) (*r1fs.FileStat, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("mock r1fs: path is required")
+// AddFileBase64 stores file contents via the base64 upload flow.
+func (m *Mock) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *r1fs.UploadOptions) (*r1fs.FileStat, error) {
+	if strings.TrimSpace(filename) == "" {
+		return nil, fmt.Errorf("mock r1fs: filename is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -120,25 +119,7 @@ func (m *Mock) Upload(ctx context.Context, path string, data io.Reader, size int
 		return nil, fmt.Errorf("mock r1fs: read payload: %w", err)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	now := m.clock()
-	entry := &fileEntry{
-		data:        append([]byte(nil), payload...),
-		contentType: "",
-		etag:        newETag(),
-		metadata:    copyMap(optsMetadata(opts)),
-		modTime:     now,
-	}
-	if opts != nil {
-		entry.contentType = opts.ContentType
-	}
-
-	normalized := normalizePath(path)
-	m.files[normalized] = entry
-
-	return buildStat(normalized, entry, chooseSize(size, int64(len(payload)))), nil
+	return m.AddFile(ctx, filename, payload, size, opts)
 }
 
 // AddFile stores contents using a generated CID, mimicking /add_file behaviour.
@@ -184,24 +165,23 @@ func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, size i
 	return stat, nil
 }
 
-// Download streams file contents into w.
-func (m *Mock) Download(ctx context.Context, path string, w io.Writer) (int64, error) {
-	if strings.TrimSpace(path) == "" {
-		return 0, fmt.Errorf("mock r1fs: path is required")
+// GetFileBase64 returns stored file contents as bytes.
+func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) ([]byte, error) {
+	if strings.TrimSpace(cid) == "" {
+		return nil, fmt.Errorf("mock r1fs: cid is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	m.mu.RLock()
-	entry, ok := m.files[normalizePath(path)]
+	entry, ok := m.files[normalizePath(cid)]
 	m.mu.RUnlock()
 	if !ok {
-		return 0, r1fs.ErrNotFound
+		return nil, r1fs.ErrNotFound
 	}
 
-	n, err := w.Write(entry.data)
-	return int64(n), err
+	return append([]byte(nil), entry.data...), nil
 }
 
 // GetFile resolves metadata for a stored CID.
@@ -283,97 +263,6 @@ func (m *Mock) GetYAML(ctx context.Context, cid string, secret string) ([]byte, 
 	return payload, nil
 }
 
-// Stat returns metadata for the given file.
-func (m *Mock) Stat(ctx context.Context, path string) (*r1fs.FileStat, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("mock r1fs: path is required")
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	m.mu.RLock()
-	entry, ok := m.files[normalizePath(path)]
-	m.mu.RUnlock()
-	if !ok {
-		return nil, r1fs.ErrNotFound
-	}
-	return buildStat(normalizePath(path), entry, int64(len(entry.data))), nil
-}
-
-// Delete removes a file.
-func (m *Mock) Delete(ctx context.Context, path string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("mock r1fs: path is required")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.files[normalizePath(path)]; !ok {
-		return r1fs.ErrNotFound
-	}
-	delete(m.files, normalizePath(path))
-	return nil
-}
-
-// List enumerates files under dir using lexical ordering.
-func (m *Mock) List(ctx context.Context, dir string, cursor string, limit int) (*r1fs.ListResult, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	prefix := normalizeDir(dir)
-
-	m.mu.RLock()
-	keys := make([]string, 0, len(m.files))
-	for path := range m.files {
-		if strings.HasPrefix(path, prefix) {
-			keys = append(keys, path)
-		}
-	}
-	m.mu.RUnlock()
-
-	sort.Strings(keys)
-
-	start := 0
-	if cursor != "" {
-		idx := sort.SearchStrings(keys, cursor)
-		for idx < len(keys) && keys[idx] <= cursor {
-			idx++
-		}
-		start = idx
-	}
-	if start > len(keys) {
-		start = len(keys)
-	}
-
-	end := len(keys)
-	if limit > 0 && start+limit < end {
-		end = start + limit
-	}
-
-	files := make([]r1fs.FileStat, 0, end-start)
-	m.mu.RLock()
-	for _, path := range keys[start:end] {
-		entry := m.files[path]
-		files = append(files, *buildStat(path, entry, int64(len(entry.data))))
-	}
-	m.mu.RUnlock()
-
-	nextCursor := ""
-	if end < len(keys) && end > 0 {
-		nextCursor = keys[end-1]
-	}
-
-	return &r1fs.ListResult{
-		Files:      files,
-		NextCursor: nextCursor,
-	}, nil
-}
-
 func buildStat(path string, entry *fileEntry, size int64) *r1fs.FileStat {
 	var modPtr *time.Time
 	if !entry.modTime.IsZero() {
@@ -399,17 +288,6 @@ func normalizePath(path string) string {
 		path = "/" + path
 	}
 	return path
-}
-
-func normalizeDir(dir string) string {
-	if dir == "" || dir == "/" {
-		return "/"
-	}
-	s := normalizePath(dir)
-	if !strings.HasSuffix(s, "/") {
-		s += "/"
-	}
-	return s
 }
 
 func copyMap(src map[string]string) map[string]string {

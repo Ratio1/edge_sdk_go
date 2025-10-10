@@ -41,15 +41,7 @@ type YAMLDocument[T any] struct {
 	Data T
 }
 
-// ListResult contains paginated listing results.
-type ListResult struct {
-	Files      []FileStat
-	NextCursor string
-}
-
 var (
 	// ErrNotFound indicates the requested file is missing.
 	ErrNotFound = errors.New("r1fs: not found")
-	// ErrUnsupportedFeature documents gaps between the desired SDK surface and upstream API support.
-	ErrUnsupportedFeature = errors.New("r1fs: unsupported feature (TODO: confirm once r1fs_manager_api.py exposes it)")
 )

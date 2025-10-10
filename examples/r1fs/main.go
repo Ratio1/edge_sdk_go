@@ -26,19 +26,19 @@ func main() {
 
 	ctx := context.Background()
 
-	fmt.Println("== Upload (add_file_base64) and Download ==")
+	fmt.Println("== AddFileBase64 and GetFileBase64 ==")
 	payload := []byte("hello from r1fs")
-	stat, err := client.Upload(ctx, "assets/hello.txt", bytes.NewReader(payload), int64(len(payload)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	stat, err := client.AddFileBase64(ctx, "assets/hello.txt", bytes.NewReader(payload), int64(len(payload)), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("uploaded CID: %s size: %d\n", stat.Path, stat.Size)
 
-	var out bytes.Buffer
-	if _, err := client.Download(ctx, stat.Path, &out); err != nil {
+	data, err := client.GetFileBase64(ctx, stat.Path, "")
+	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("downloaded contents: %q\n", out.String())
+	fmt.Printf("downloaded contents: %q\n", string(data))
 
 	fmt.Println("\n== AddFile (multipart) and GetFile metadata ==")
 	fileStat, err := client.AddFile(ctx, "report.bin", bytes.NewReader([]byte{0xde, 0xad, 0xbe, 0xef}), 4, &r1fs.UploadOptions{Metadata: map[string]string{"origin": "example"}})

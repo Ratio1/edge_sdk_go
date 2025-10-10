@@ -10,7 +10,7 @@ The library mirrors the FastAPI plugins shipped in the Ratio1 edge node:
 - [`cstore_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py)
 - [`r1fs_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py)
 
-When the official APIs lack features (TTL headers, full directory listings, deletes), the SDK documents the gap with TODO markers and returns `ErrUnsupportedFeature` where appropriate.
+When the official APIs lack features (TTL headers, directory listings, deletes), the SDK documents the gap with TODO markers and either omits the surface or returns `ErrUnsupportedFeature` where appropriate.
 
 ## Install
 
@@ -155,7 +155,7 @@ func main() {
 
 	// File primitives
 	data := []byte(`{"ok":true}`)
-	stat, err := fs.Upload(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
+	stat, err := fs.AddFileBase64(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
 	if err != nil {
 		log.Fatalf("r1fs upload: %v", err)
 	}
@@ -204,7 +204,7 @@ make tag VERSION=v0.1.0
 
 ## Limitations & TODOs
 
-- Upstream APIs currently lack TTL, delete, and list support. The SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
+- The CStore REST manager still lacks TTL and conditional write headers; the SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
 - R1FS streaming is implemented via base64 payloads; a TODO tracks upgrading to streaming uploads when supported.
 - CStore `Put` ignores TTL/conditional headers until the REST manager accepts them.
 

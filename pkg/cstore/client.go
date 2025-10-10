@@ -87,11 +87,6 @@ func (c *Client) List(ctx context.Context, prefix string, cursor string, limit i
 	return listItems[json.RawMessage](ctx, c, prefix, cursor, limit)
 }
 
-// Delete is not currently supported by the upstream API.
-func (c *Client) Delete(ctx context.Context, key string) error {
-	return fmt.Errorf("%w: delete endpoint missing in cstore_manager_api.py", ErrUnsupportedFeature)
-}
-
 // GetJSON fetches the raw JSON payload stored for a key.
 func (c *Client) GetJSON(ctx context.Context, key string) ([]byte, error) {
 	return getRaw(ctx, c, key)

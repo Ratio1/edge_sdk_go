@@ -1,7 +1,6 @@
 package r1fs_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -41,9 +40,8 @@ func TestNewFromEnvHTTP(t *testing.T) {
 		t.Fatalf("expected http mode, got %q", mode)
 	}
 
-	var buf strings.Builder
-	if _, err := client.Download(context.Background(), "/missing", &buf); err != nil {
-		t.Fatalf("Download: %v", err)
+	if _, err := client.GetFileBase64(context.Background(), "/missing", ""); err != nil {
+		t.Fatalf("GetFileBase64: %v", err)
 	}
 }
 
@@ -60,12 +58,12 @@ func TestNewFromEnvMockFallback(t *testing.T) {
 	}
 
 	payload := strings.NewReader("hello")
-	stat, err := client.Upload(context.Background(), "hello.txt", payload, int64(payload.Len()), nil)
+	stat, err := client.AddFileBase64(context.Background(), "hello.txt", payload, int64(payload.Len()), nil)
 	if err != nil {
-		t.Fatalf("Upload: %v", err)
+		t.Fatalf("AddFileBase64: %v", err)
 	}
 	if stat.Path == "" {
-		t.Fatalf("Upload returned empty path")
+		t.Fatalf("AddFileBase64 returned empty path")
 	}
 }
 
@@ -85,13 +83,12 @@ func TestNewFromEnvSeed(t *testing.T) {
 		t.Fatalf("expected mock mode, got %q", mode)
 	}
 
-	var buf bytes.Buffer
-	n, err := client.Download(context.Background(), "/seed.txt", &buf)
+	payload, err := client.GetFileBase64(context.Background(), "/seed.txt", "")
 	if err != nil {
-		t.Fatalf("Download seed: %v", err)
+		t.Fatalf("GetFileBase64 seed: %v", err)
 	}
-	if n == 0 || buf.String() != "seed-data" {
-		t.Fatalf("unexpected seed contents: %q", buf.String())
+	if len(payload) == 0 || string(payload) != "seed-data" {
+		t.Fatalf("unexpected seed contents: %q", string(payload))
 	}
 }
 

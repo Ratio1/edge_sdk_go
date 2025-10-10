@@ -269,11 +269,3 @@ func TestPutOptionsUnsupported(t *testing.T) {
 		t.Fatalf("expected ErrUnsupportedFeature for IfAbsent, got %v", err)
 	}
 }
-
-func TestDeleteUnsupported(t *testing.T) {
-	client := &cstore.Client{}
-	err := client.Delete(context.Background(), "foo")
-	if !errors.Is(err, cstore.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature, got %v", err)
-	}
-}

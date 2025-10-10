@@ -340,7 +340,7 @@ func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 	if strings.TrimSpace(payload.Secret) != "" {
 		opts.Secret = payload.Secret
 	}
-	stat, err := fs.Upload(r.Context(), filename, bytes.NewReader(data), int64(len(data)), opts)
+	stat, err := fs.AddFileBase64(r.Context(), filename, bytes.NewReader(data), int64(len(data)), opts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -364,8 +364,8 @@ func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 		http.Error(w, "cid is required", http.StatusBadRequest)
 		return
 	}
-	var buf bytes.Buffer
-	if _, err := fs.Download(r.Context(), payload.CID, &buf); err != nil {
+	data, err := fs.GetFileBase64(r.Context(), payload.CID, "")
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -374,18 +374,13 @@ func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 		filename = loc.Filename
 	}
 	writeResult(w, map[string]any{
-		"file_base64_str": base64.StdEncoding.EncodeToString(buf.Bytes()),
+		"file_base64_str": base64.StdEncoding.EncodeToString(data),
 		"filename":        filename,
 	})
 }
 
 func handleR1FSStatus(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
-	res, err := fs.List(r.Context(), "/", "", 0)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	writeResult(w, map[string]any{"files": res.Files})
+	http.Error(w, "r1fs list not supported", http.StatusNotImplemented)
 }
 
 func handleR1FSAddFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {

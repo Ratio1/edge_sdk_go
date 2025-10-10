@@ -290,21 +290,6 @@ func listItems[T any](ctx context.Context, store *Mock, prefix string, cursor st
 	}, nil
 }
 
-// Delete removes a key.
-func (m *Mock) Delete(ctx context.Context, key string) error {
-	if strings.TrimSpace(key) == "" {
-		return fmt.Errorf("mock cstore: key is required")
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.items[key]; !ok {
-		return cstore.ErrNotFound
-	}
-	delete(m.items, key)
-	return nil
-}
-
 func newETag() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {

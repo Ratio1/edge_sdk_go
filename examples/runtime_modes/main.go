@@ -62,11 +62,11 @@ func demoHTTP() error {
 	fmt.Println("cstore get:", itemValue)
 
 	data := []byte("hello http")
-	stat, err := fs.Upload(ctx, "/docs/http.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	stat, err := fs.AddFileBase64(ctx, "/docs/http.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("r1fs upload: cid=%s size=%d\n", stat.Path, stat.Size)
+	fmt.Printf("r1fs add_file_base64: cid=%s size=%d\n", stat.Path, stat.Size)
 
 	return nil
 }
