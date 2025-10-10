@@ -121,3 +121,60 @@ func TestMockSeed(t *testing.T) {
 		t.Fatalf("unexpected seeded value: %#v", got)
 	}
 }
+
+func TestMockHashOperations(t *testing.T) {
+	m := mock.New()
+	ctx := context.Background()
+
+	item, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "one"}, nil)
+	if err != nil {
+		t.Fatalf("HSet initial: %v", err)
+	}
+	if item.HashKey != "jobs" || item.Field != "123" || item.Value.Value != "one" || item.ETag == "" {
+		t.Fatalf("unexpected HSet result: %#v", item)
+	}
+
+	got, err := mock.HGet[sample](ctx, m, "jobs", "123")
+	if err != nil {
+		t.Fatalf("HGet: %v", err)
+	}
+	if got == nil || got.Value.Value != "one" {
+		t.Fatalf("unexpected HGet result: %#v", got)
+	}
+
+	if _, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "second"}, &cstore.PutOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrPreconditionFailed) {
+		t.Fatalf("expected ErrPreconditionFailed for hash IfAbsent, got %v", err)
+	}
+
+	updated, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "second"}, &cstore.PutOptions{IfETagMatch: item.ETag})
+	if err != nil {
+		t.Fatalf("conditional HSet: %v", err)
+	}
+	if updated.Value.Value != "second" || updated.ETag == item.ETag {
+		t.Fatalf("expected updated hash value with new etag: %#v", updated)
+	}
+
+	all, err := mock.HGetAll[sample](ctx, m, "jobs")
+	if err != nil {
+		t.Fatalf("HGetAll: %v", err)
+	}
+	if len(all) != 1 || all[0].Field != "123" || all[0].Value.Value != "second" {
+		t.Fatalf("unexpected HGetAll result: %#v", all)
+	}
+
+	missing, err := mock.HGet[sample](ctx, m, "jobs", "999")
+	if err != nil {
+		t.Fatalf("HGet missing: %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("expected nil for missing hash field, got %#v", missing)
+	}
+
+	empty, err := mock.HGetAll[sample](ctx, m, "unknown")
+	if err != nil {
+		t.Fatalf("HGetAll missing: %v", err)
+	}
+	if empty != nil {
+		t.Fatalf("expected nil for missing hash, got %#v", empty)
+	}
+}

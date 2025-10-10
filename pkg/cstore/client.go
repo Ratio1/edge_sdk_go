@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
+	"github.com/Ratio1/ratio1_sdk_go/internal/ratio1api"
 )
 
 // Client provides access to the upstream CStore REST API.
@@ -38,24 +40,52 @@ func NewWithBackend(b Backend) *Client {
 	return &Client{backend: b}
 }
 
-// Get retrieves a value and decodes it into the requested type.
-func Get[T any](ctx context.Context, client *Client, key string) (*Item[T], error) {
-	return getItem[T](ctx, client, key)
+// Get retrieves a value as raw JSON. Provide out to decode into a struct.
+func (c *Client) Get(ctx context.Context, key string, out any) (*Item[json.RawMessage], error) {
+	item, err := getItem[json.RawMessage](ctx, c, key)
+	if err != nil || item == nil {
+		return item, err
+	}
+	if out != nil {
+		if err := json.Unmarshal(item.Value, out); err != nil {
+			return nil, fmt.Errorf("cstore: decode value: %w", err)
+		}
+	}
+	return item, nil
 }
 
 // Put stores a value encoded as JSON.
-func Put[T any](ctx context.Context, client *Client, key string, value T, opts *PutOptions) (*Item[T], error) {
-	return putItem(ctx, client, key, value, opts)
+func (c *Client) Put(ctx context.Context, key string, value any, opts *PutOptions) (*Item[json.RawMessage], error) {
+	return putJSONEncoded(ctx, c, key, value, opts)
+}
+
+// HGet retrieves a value stored under a hash key and decodes it into the requested type.
+func (c *Client) HGet(ctx context.Context, hashKey, field string, out any) (*HashItem[json.RawMessage], error) {
+	item, err := getHashItem[json.RawMessage](ctx, c, hashKey, field)
+	if err != nil || item == nil {
+		return item, err
+	}
+	if out != nil {
+		if err := json.Unmarshal(item.Value, out); err != nil {
+			return nil, fmt.Errorf("cstore: decode hash value: %w", err)
+		}
+	}
+	return item, nil
+}
+
+// HSet stores a field value within a hash key.
+func (c *Client) HSet(ctx context.Context, hashKey, field string, value any, opts *PutOptions) (*HashItem[json.RawMessage], error) {
+	return putHashJSONEncoded(ctx, c, hashKey, field, value, opts)
+}
+
+// HGetAll retrieves all fields stored under a hash key.
+func (c *Client) HGetAll(ctx context.Context, hashKey string) ([]HashItem[json.RawMessage], error) {
+	return getAllHashItems[json.RawMessage](ctx, c, hashKey)
 }
 
 // List enumerates keys using the /get_status endpoint and returns decoded items.
-func List[T any](ctx context.Context, client *Client, prefix string, cursor string, limit int) (*ListResult[T], error) {
-	return listItems[T](ctx, client, prefix, cursor, limit)
-}
-
-// Delete is not currently supported by the upstream API.
-func (c *Client) Delete(ctx context.Context, key string) error {
-	return fmt.Errorf("%w: delete endpoint missing in cstore_manager_api.py", ErrUnsupportedFeature)
+func (c *Client) List(ctx context.Context, prefix string, cursor string, limit int) (*ListResult[json.RawMessage], error) {
+	return listItems[json.RawMessage](ctx, c, prefix, cursor, limit)
 }
 
 // GetJSON fetches the raw JSON payload stored for a key.
@@ -65,16 +95,7 @@ func (c *Client) GetJSON(ctx context.Context, key string) ([]byte, error) {
 
 // PutJSON stores a pre-encoded JSON payload (as string).
 func (c *Client) PutJSON(ctx context.Context, key string, jsonPayload string, opts *PutOptions) (*Item[json.RawMessage], error) {
-	item, err := putItem(ctx, c, key, json.RawMessage(jsonPayload), opts)
-	if err != nil {
-		return nil, err
-	}
-	return &Item[json.RawMessage]{
-		Key:       item.Key,
-		Value:     json.RawMessage(jsonPayload),
-		ETag:      item.ETag,
-		ExpiresAt: item.ExpiresAt,
-	}, nil
+	return putRawJSON(ctx, c, key, []byte(jsonPayload), opts)
 }
 
 func getItem[T any](ctx context.Context, client *Client, key string) (*Item[T], error) {
@@ -111,6 +132,150 @@ func putItem[T any](ctx context.Context, client *Client, key string, value T, op
 	}
 
 	item := &Item[T]{Key: key, Value: value}
+	if meta != nil {
+		item.ETag = meta.ETag
+		item.ExpiresAt = meta.ExpiresAt
+	}
+	return item, nil
+}
+
+func putJSONEncoded(ctx context.Context, client *Client, key string, value any, opts *PutOptions) (*Item[json.RawMessage], error) {
+	payloadBytes, err := jsonMarshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: encode value: %w", err)
+	}
+	return putRawJSON(ctx, client, key, payloadBytes, opts)
+}
+
+func putRawJSON(ctx context.Context, client *Client, key string, payload []byte, opts *PutOptions) (*Item[json.RawMessage], error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("cstore: key is required")
+	}
+	if err := validatePutOptions(opts); err != nil {
+		return nil, err
+	}
+
+	if client == nil || client.backend == nil {
+		return nil, fmt.Errorf("cstore: client is nil")
+	}
+
+	raw := append([]byte(nil), bytes.TrimSpace(payload)...)
+
+	meta, err := client.backend.PutRaw(ctx, key, raw, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	item := &Item[json.RawMessage]{
+		Key:   key,
+		Value: json.RawMessage(raw),
+	}
+	if meta != nil {
+		item.ETag = meta.ETag
+		item.ExpiresAt = meta.ExpiresAt
+	}
+	return item, nil
+}
+
+func getHashItem[T any](ctx context.Context, client *Client, hashKey, field string) (*HashItem[T], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("cstore: hash key is required")
+	}
+	if strings.TrimSpace(field) == "" {
+		return nil, fmt.Errorf("cstore: hash field is required")
+	}
+	if client == nil || client.backend == nil {
+		return nil, fmt.Errorf("cstore: client is nil")
+	}
+	data, err := client.backend.HGetRaw(ctx, hashKey, field)
+	if err != nil {
+		return nil, err
+	}
+	return decodeHashItem[T](hashKey, field, data)
+}
+
+func putHashItem[T any](ctx context.Context, client *Client, hashKey, field string, value T, opts *PutOptions) (*HashItem[T], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("cstore: hash key is required")
+	}
+	if strings.TrimSpace(field) == "" {
+		return nil, fmt.Errorf("cstore: hash field is required")
+	}
+	if err := validatePutOptions(opts); err != nil {
+		return nil, err
+	}
+
+	payloadBytes, err := jsonMarshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: encode hash value: %w", err)
+	}
+
+	if client == nil || client.backend == nil {
+		return nil, fmt.Errorf("cstore: client is nil")
+	}
+
+	meta, err := client.backend.HSetRaw(ctx, hashKey, field, payloadBytes, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	item := &HashItem[T]{HashKey: hashKey, Field: field, Value: value}
+	if meta != nil {
+		item.ETag = meta.ETag
+		item.ExpiresAt = meta.ExpiresAt
+	}
+	return item, nil
+}
+
+func getAllHashItems[T any](ctx context.Context, client *Client, hashKey string) ([]HashItem[T], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("cstore: hash key is required")
+	}
+	if client == nil || client.backend == nil {
+		return nil, fmt.Errorf("cstore: client is nil")
+	}
+	data, err := client.backend.HGetAllRaw(ctx, hashKey)
+	if err != nil {
+		return nil, err
+	}
+	return decodeHashItems[T](hashKey, data)
+}
+
+func putHashJSONEncoded(ctx context.Context, client *Client, hashKey, field string, value any, opts *PutOptions) (*HashItem[json.RawMessage], error) {
+	payloadBytes, err := jsonMarshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: encode hash value: %w", err)
+	}
+	return putHashRawJSON(ctx, client, hashKey, field, payloadBytes, opts)
+}
+
+func putHashRawJSON(ctx context.Context, client *Client, hashKey, field string, payload []byte, opts *PutOptions) (*HashItem[json.RawMessage], error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("cstore: hash key is required")
+	}
+	if strings.TrimSpace(field) == "" {
+		return nil, fmt.Errorf("cstore: hash field is required")
+	}
+	if err := validatePutOptions(opts); err != nil {
+		return nil, err
+	}
+
+	if client == nil || client.backend == nil {
+		return nil, fmt.Errorf("cstore: client is nil")
+	}
+
+	raw := append([]byte(nil), bytes.TrimSpace(payload)...)
+
+	meta, err := client.backend.HSetRaw(ctx, hashKey, field, raw, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	item := &HashItem[json.RawMessage]{
+		HashKey: hashKey,
+		Field:   field,
+		Value:   json.RawMessage(raw),
+	}
 	if meta != nil {
 		item.ETag = meta.ETag
 		item.ExpiresAt = meta.ExpiresAt
@@ -192,27 +357,6 @@ func decodeItem[T any](key string, data []byte) (*Item[T], error) {
 		return nil, nil
 	}
 
-	result := struct {
-		Result string `json:"result"`
-	}{}
-
-	err := json.Unmarshal(trimmed, &result)
-	if err != nil {
-		return nil, err
-	}
-
-	var str string
-	if err := json.Unmarshal([]byte(result.Result), &str); err == nil {
-		var value T
-		if err := json.Unmarshal([]byte(str), &value); err != nil {
-			if assignString(&value, str) {
-				return &Item[T]{Key: key, Value: value}, nil
-			}
-			return nil, fmt.Errorf("cstore: decode JSON payload: %w", err)
-		}
-		return &Item[T]{Key: key, Value: value}, nil
-	}
-
 	var value T
 	if err := json.Unmarshal(trimmed, &value); err != nil {
 		return nil, fmt.Errorf("cstore: decode value: %w", err)
@@ -220,12 +364,48 @@ func decodeItem[T any](key string, data []byte) (*Item[T], error) {
 	return &Item[T]{Key: key, Value: value}, nil
 }
 
-func assignString[T any](ptr *T, value string) bool {
-	if strPtr, ok := any(ptr).(*string); ok {
-		*strPtr = value
-		return true
+func decodeHashItem[T any](hashKey, field string, data []byte) (*HashItem[T], error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
 	}
-	return false
+
+	var value T
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return nil, fmt.Errorf("cstore: decode hash value: %w", err)
+	}
+	return &HashItem[T]{HashKey: hashKey, Field: field, Value: value}, nil
+}
+
+func decodeHashItems[T any](hashKey string, data []byte) ([]HashItem[T], error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &raw); err != nil {
+		return nil, fmt.Errorf("cstore: decode hash map: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+
+	fields := make([]string, 0, len(raw))
+	for field := range raw {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	items := make([]HashItem[T], 0, len(fields))
+	for _, field := range fields {
+		var value T
+		if err := json.Unmarshal(raw[field], &value); err != nil {
+			return nil, fmt.Errorf("cstore: decode hash field %q: %w", field, err)
+		}
+		items = append(items, HashItem[T]{HashKey: hashKey, Field: field, Value: value})
+	}
+	return items, nil
 }
 
 func validatePutOptions(opts *PutOptions) error {
@@ -263,10 +443,49 @@ func encodeJSON(payload any) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
+func coerceBool(value any) (bool, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return false, fmt.Errorf("empty string")
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, err
+		}
+		return b, nil
+	case float64:
+		return v != 0, nil
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return false, err
+		}
+		return i != 0, nil
+	case nil:
+		return false, fmt.Errorf("nil result")
+	default:
+		return false, fmt.Errorf("unexpected type %T", v)
+	}
+}
+
+func decodeBoolResult(body []byte) (bool, error) {
+	var raw any
+	if err := ratio1api.DecodeResult(body, &raw); err != nil {
+		return false, err
+	}
+	return coerceBool(raw)
+}
+
 type Backend interface {
 	GetRaw(ctx context.Context, key string) ([]byte, error)
 	PutRaw(ctx context.Context, key string, raw []byte, opts *PutOptions) (*Item[json.RawMessage], error)
 	ListKeys(ctx context.Context) ([]string, error)
+	HGetRaw(ctx context.Context, hashKey, field string) ([]byte, error)
+	HSetRaw(ctx context.Context, hashKey, field string, raw []byte, opts *PutOptions) (*HashItem[json.RawMessage], error)
+	HGetAllRaw(ctx context.Context, hashKey string) ([]byte, error)
 }
 
 type httpBackend struct {
@@ -285,7 +504,18 @@ func (b *httpBackend) GetRaw(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return httpx.ReadAllAndClose(resp.Body)
+	data, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := ratio1api.ExtractResult(data)
+	if err != nil {
+		return nil, err
+	}
+	if payload == nil {
+		return nil, nil
+	}
+	return payload, nil
 }
 
 func (b *httpBackend) PutRaw(ctx context.Context, key string, raw []byte, opts *PutOptions) (*Item[json.RawMessage], error) {
@@ -313,7 +543,17 @@ func (b *httpBackend) PutRaw(ctx context.Context, key string, raw []byte, opts *
 	if err != nil {
 		return nil, err
 	}
-	_ = resp.Body.Close()
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := decodeBoolResult(payloadBytes)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: decode set response: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("cstore: set rejected by upstream")
+	}
 	return nil, nil
 }
 
@@ -332,16 +572,103 @@ func (b *httpBackend) ListKeys(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, nil
-	}
 	var payload struct {
-		Result struct {
-			Keys []string `json:"keys"`
-		} `json:"result"`
+		Keys []string `json:"keys"`
 	}
-	if err := json.Unmarshal(data, &payload); err != nil {
+	if err := ratio1api.DecodeResult(data, &payload); err != nil {
 		return nil, fmt.Errorf("cstore: decode get_status response: %w", err)
 	}
-	return payload.Result.Keys, nil
+	return payload.Keys, nil
+}
+
+func (b *httpBackend) HGetRaw(ctx context.Context, hashKey, field string) ([]byte, error) {
+	if b == nil || b.client == nil {
+		return nil, fmt.Errorf("cstore: http backend not configured")
+	}
+	resp, err := b.client.Do(ctx, &httpx.Request{
+		Method: http.MethodGet,
+		Path:   "hget",
+		Query:  url.Values{"hkey": {hashKey}, "key": {field}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	data, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := ratio1api.ExtractResult(data)
+	if err != nil {
+		return nil, err
+	}
+	if payload == nil {
+		return nil, nil
+	}
+	return payload, nil
+}
+
+func (b *httpBackend) HSetRaw(ctx context.Context, hashKey, field string, raw []byte, opts *PutOptions) (*HashItem[json.RawMessage], error) {
+	if b == nil || b.client == nil {
+		return nil, fmt.Errorf("cstore: http backend not configured")
+	}
+	body, err := encodeJSON(map[string]any{
+		"hkey":             hashKey,
+		"key":              field,
+		"value":            string(raw),
+		"chainstore_peers": []string{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	req := &httpx.Request{
+		Method: http.MethodPost,
+		Path:   "hset",
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   bytes.NewReader(body),
+		GetBody: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(body)), nil
+		},
+	}
+	resp, err := b.client.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := decodeBoolResult(payloadBytes)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: decode hset response: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("cstore: hset rejected by upstream")
+	}
+	return nil, nil
+}
+
+func (b *httpBackend) HGetAllRaw(ctx context.Context, hashKey string) ([]byte, error) {
+	if b == nil || b.client == nil {
+		return nil, fmt.Errorf("cstore: http backend not configured")
+	}
+	resp, err := b.client.Do(ctx, &httpx.Request{
+		Method: http.MethodGet,
+		Path:   "hgetall",
+		Query:  url.Values{"hkey": {hashKey}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	data, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := ratio1api.ExtractResult(data)
+	if err != nil {
+		return nil, err
+	}
+	if payload == nil {
+		return nil, nil
+	}
+	return payload, nil
 }
