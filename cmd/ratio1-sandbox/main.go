@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -79,13 +80,41 @@ func main() {
 		fmt.Println("exec request cstore get")
 		handleCStoreGet(w, r, csMock)
 	}))
+	mux.HandleFunc("/hset", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request cstore hset")
+		handleCStoreHSet(w, r, csMock)
+	}))
+	mux.HandleFunc("/hget", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request cstore hget")
+		handleCStoreHGet(w, r, csMock)
+	}))
+	mux.HandleFunc("/hgetall", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request cstore hgetall")
+		handleCStoreHGetAll(w, r, csMock)
+	}))
 	mux.HandleFunc("/add_file_base64", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("exec request r1fs add file")
+		fmt.Println("exec request r1fs add file base64")
 		handleR1FSAddFileBase64(w, r, fsMock)
 	}))
+	mux.HandleFunc("/add_file", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request r1fs add file")
+		handleR1FSAddFile(w, r, fsMock)
+	}))
 	mux.HandleFunc("/get_file_base64", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("exec request r1fs get file")
+		fmt.Println("exec request r1fs get file base64")
 		handleR1FSGetFileBase64(w, r, fsMock)
+	}))
+	mux.HandleFunc("/get_file", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request r1fs get file")
+		handleR1FSGetFile(w, r, fsMock)
+	}))
+	mux.HandleFunc("/add_yaml", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request r1fs add yaml")
+		handleR1FSAddYAML(w, r, fsMock)
+	}))
+	mux.HandleFunc("/get_yaml", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("exec request r1fs get yaml")
+		handleR1FSGetYAML(w, r, fsMock)
 	}))
 	mux.HandleFunc("/get_status_r1fs", withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("exec request r1fs get status")
@@ -141,7 +170,7 @@ func handleCStoreStatus(w http.ResponseWriter, r *http.Request, store *cstoremoc
 	for _, item := range list.Items {
 		keys = append(keys, item.Key)
 	}
-	writeJSON(w, map[string]any{"keys": keys})
+	writeResult(w, map[string]any{"keys": keys})
 }
 
 func handleCStoreSet(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
@@ -161,11 +190,19 @@ func handleCStoreSet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		http.Error(w, "key is required", http.StatusBadRequest)
 		return
 	}
-	if _, err := cstoremock.Put(r.Context(), store, payload.Key, payload.Value, nil); err != nil {
+	value, err := decodeJSONPayload(payload.Value)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid value: %v", err), http.StatusBadRequest)
+		return
+	}
+	if value == nil {
+		value = json.RawMessage("null")
+	}
+	if _, err := cstoremock.Put(r.Context(), store, payload.Key, value, nil); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, true)
+	writeResult(w, true)
 }
 
 func handleCStoreGet(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
@@ -184,10 +221,92 @@ func handleCStoreGet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		return
 	}
 	if item == nil {
-		writeJSON(w, nil)
+		writeResult(w, nil)
 		return
 	}
-	writeJSON(w, item.Value)
+	writeResult(w, string(item.Value))
+}
+
+func handleCStoreHSet(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload struct {
+		HashKey string          `json:"hkey"`
+		Field   string          `json:"key"`
+		Value   json.RawMessage `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(payload.HashKey) == "" || strings.TrimSpace(payload.Field) == "" {
+		http.Error(w, "hkey and key are required", http.StatusBadRequest)
+		return
+	}
+	value, err := decodeJSONPayload(payload.Value)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid value: %v", err), http.StatusBadRequest)
+		return
+	}
+	if value == nil {
+		value = json.RawMessage("null")
+	}
+	if _, err := cstoremock.HSet(r.Context(), store, payload.HashKey, payload.Field, value, nil); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeResult(w, true)
+}
+
+func handleCStoreHGet(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	hashKey := r.URL.Query().Get("hkey")
+	field := r.URL.Query().Get("key")
+	if strings.TrimSpace(hashKey) == "" || strings.TrimSpace(field) == "" {
+		http.Error(w, "hkey and key are required", http.StatusBadRequest)
+		return
+	}
+	item, err := cstoremock.HGet[json.RawMessage](r.Context(), store, hashKey, field)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if item == nil {
+		writeResult(w, nil)
+		return
+	}
+	writeResult(w, string(item.Value))
+}
+
+func handleCStoreHGetAll(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	hashKey := r.URL.Query().Get("hkey")
+	if strings.TrimSpace(hashKey) == "" {
+		http.Error(w, "hkey is required", http.StatusBadRequest)
+		return
+	}
+	items, err := cstoremock.HGetAll[json.RawMessage](r.Context(), store, hashKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(items) == 0 {
+		writeResult(w, nil)
+		return
+	}
+	result := make(map[string]string, len(items))
+	for _, item := range items {
+		result[item.Field] = string(item.Value)
+	}
+	writeResult(w, result)
 }
 
 func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
@@ -217,12 +336,16 @@ func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 	if filename == "" {
 		filename = fmt.Sprintf("file-%d.bin", time.Now().UnixNano())
 	}
-	stat, err := fs.Upload(r.Context(), filename, bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: http.DetectContentType(data)})
+	opts := &r1fs.UploadOptions{ContentType: http.DetectContentType(data)}
+	if strings.TrimSpace(payload.Secret) != "" {
+		opts.Secret = payload.Secret
+	}
+	stat, err := fs.Upload(r.Context(), filename, bytes.NewReader(data), int64(len(data)), opts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]string{"cid": stat.Path})
+	writeResult(w, map[string]any{"cid": stat.Path})
 }
 
 func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
@@ -246,9 +369,13 @@ func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	writeJSON(w, map[string]string{
+	filename := strings.TrimPrefix(payload.CID, "/")
+	if loc, err := fs.GetFile(r.Context(), payload.CID, ""); err == nil && loc != nil && loc.Filename != "" {
+		filename = loc.Filename
+	}
+	writeResult(w, map[string]any{
 		"file_base64_str": base64.StdEncoding.EncodeToString(buf.Bytes()),
-		"filename":        strings.TrimPrefix(payload.CID, "/"),
+		"filename":        filename,
 	})
 }
 
@@ -258,7 +385,146 @@ func handleR1FSStatus(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"files": res.Files})
+	writeResult(w, map[string]any{"files": res.Files})
+}
+
+func handleR1FSAddFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	metaRaw := r.FormValue("body_json")
+	opts := &r1fs.UploadOptions{}
+	if strings.TrimSpace(metaRaw) != "" {
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
+			http.Error(w, fmt.Sprintf("invalid body_json: %v", err), http.StatusBadRequest)
+			return
+		}
+		if secret, ok := meta["secret"].(string); ok {
+			opts.Secret = secret
+		}
+		if ct, ok := meta["content_type"].(string); ok {
+			opts.ContentType = ct
+		}
+		if md, ok := meta["metadata"].(map[string]any); ok {
+			opts.Metadata = map[string]string{}
+			for k, v := range md {
+				if str, ok := v.(string); ok {
+					opts.Metadata[k] = str
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(opts.ContentType) == "" {
+		opts.ContentType = http.DetectContentType(data)
+	}
+	stat, err := fs.AddFile(r.Context(), header.Filename, data, int64(len(data)), opts)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeResult(w, map[string]any{"cid": stat.Path})
+}
+
+func handleR1FSGetFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cid := r.URL.Query().Get("cid")
+	secret := r.URL.Query().Get("secret")
+	if strings.TrimSpace(cid) == "" {
+		http.Error(w, "cid is required", http.StatusBadRequest)
+		return
+	}
+	loc, err := fs.GetFile(r.Context(), cid, secret)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeResult(w, map[string]any{
+		"file_path": loc.Path,
+		"meta":      loc.Meta,
+	})
+}
+
+func handleR1FSAddYAML(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var payload struct {
+		Data     json.RawMessage `json:"data"`
+		Filename string          `json:"fn"`
+		Secret   string          `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(bytes.TrimSpace(payload.Data)) == 0 {
+		http.Error(w, "data is required", http.StatusBadRequest)
+		return
+	}
+	var value any
+	if err := json.Unmarshal(payload.Data, &value); err != nil {
+		http.Error(w, fmt.Sprintf("invalid data: %v", err), http.StatusBadRequest)
+		return
+	}
+	cid, err := fs.AddYAML(r.Context(), value, payload.Filename, payload.Secret)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeResult(w, map[string]any{"cid": cid})
+}
+
+func handleR1FSGetYAML(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	cid := r.URL.Query().Get("cid")
+	secret := r.URL.Query().Get("secret")
+	if strings.TrimSpace(cid) == "" {
+		http.Error(w, "cid is required", http.StatusBadRequest)
+		return
+	}
+	data, err := fs.GetYAML(r.Context(), cid, secret)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(data) == 0 {
+		writeResult(w, nil)
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		http.Error(w, fmt.Sprintf("decode yaml payload: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeResult(w, payload)
+}
+
+func writeResult(w http.ResponseWriter, payload any) {
+	writeJSON(w, map[string]any{"result": payload})
 }
 
 func writeJSON(w http.ResponseWriter, payload any) {
@@ -266,6 +532,33 @@ func writeJSON(w http.ResponseWriter, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func decodeJSONPayload(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	if trimmed[0] != '"' {
+		return append([]byte(nil), trimmed...), nil
+	}
+	var inner string
+	if err := json.Unmarshal(trimmed, &inner); err != nil {
+		return nil, err
+	}
+	inner = strings.TrimSpace(inner)
+	if inner == "" || strings.EqualFold(inner, "null") {
+		return json.RawMessage("null"), nil
+	}
+	var candidate json.RawMessage
+	if err := json.Unmarshal([]byte(inner), &candidate); err == nil {
+		return candidate, nil
+	}
+	encoded, err := json.Marshal(inner)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(encoded), nil
 }
 
 func parseFailConfig(raw string) (failConfig, error) {

@@ -233,14 +233,15 @@ func TestUploadAndDownload(t *testing.T) {
 	if strings.TrimSpace(yamlCID) == "" {
 		t.Fatalf("AddYAML returned empty cid")
 	}
-	doc, err := r1fs.GetYAML[map[string]any](ctx, client, yamlCID, "")
+	var yamlDoc map[string]any
+	doc, err := client.GetYAML(ctx, yamlCID, "", &yamlDoc)
 	if err != nil {
 		t.Fatalf("GetYAML: %v", err)
 	}
-	if doc == nil || doc.Data["name"] != "ratio1" {
-		t.Fatalf("unexpected YAML document: %#v", doc)
+	if doc == nil || yamlDoc["name"] != "ratio1" {
+		t.Fatalf("unexpected YAML document: %#v value=%#v", doc, yamlDoc)
 	}
-	if _, err := r1fs.GetYAML[map[string]any](ctx, client, "missing-yaml", ""); err == nil {
+	if _, err := client.GetYAML(ctx, "missing-yaml", "", nil); err == nil {
 		t.Fatalf("expected error for missing YAML document")
 	}
 }

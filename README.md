@@ -84,7 +84,7 @@ go run ./cmd/ratio1-sandbox --addr :8787
 - `--latency 200ms` – inject fixed latency before every request.
 - `--fail rate=0.05,code=500` – randomly inject HTTP failures.
 
-The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (`/set`, `/get`, `/get_status` for CStore; `/add_file_base64`, `/get_file_base64`, `/get_status_r1fs` for R1FS). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
+The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/get_status_r1fs`). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
 
 ## Usage snippets
 
@@ -94,6 +94,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
@@ -119,14 +120,14 @@ func main() {
 
 	// Key/value primitives
 	counter := Counter{Count: 1}
-	if _, err := cstore.Put(ctx, cs, "jobs:123", counter, nil); err != nil {
+	if _, err := cs.Put(ctx, "jobs:123", counter, nil); err != nil {
 		log.Fatalf("cstore put: %v", err)
 	}
-	item, err := cstore.Get[Counter](ctx, cs, "jobs:123")
-	if err != nil {
+	var stored Counter
+	if _, err := cs.Get(ctx, "jobs:123", &stored); err != nil {
 		log.Fatalf("cstore get: %v", err)
 	}
-	fmt.Println("retrieved counter:", item.Value.Count)
+	fmt.Println("retrieved counter:", stored.Count)
 
 	if _, err := cs.PutJSON(ctx, "jobs:meta", `{"owner":"alice"}`, nil); err != nil {
 		log.Fatalf("cstore put json: %v", err)
@@ -137,14 +138,20 @@ func main() {
 	}
 	fmt.Println("raw metadata:", string(raw))
 
-	if _, err := cstore.HSet(ctx, cs, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
+	if _, err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
 		log.Fatalf("cstore hset: %v", err)
 	}
-	hItems, err := cstore.HGetAll[map[string]string](ctx, cs, "jobs")
+	hItems, err := cs.HGetAll(ctx, "jobs")
 	if err != nil {
 		log.Fatalf("cstore hgetall: %v", err)
 	}
-	fmt.Println("hash fields:", hItems)
+	for _, item := range hItems {
+		var value map[string]string
+		if err := json.Unmarshal(item.Value, &value); err != nil {
+			log.Fatalf("decode hash field %s: %v", item.Field, err)
+		}
+		fmt.Printf("hash %s -> %v\n", item.Field, value)
+	}
 
 	// File primitives
 	data := []byte(`{"ok":true}`)
@@ -168,15 +175,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("r1fs add_yaml: %v", err)
 	}
-	yamlDoc, err := r1fs.GetYAML[map[string]any](ctx, fs, cid, "")
-	if err != nil {
+	var yamlDoc map[string]any
+	if _, err := fs.GetYAML(ctx, cid, "", &yamlDoc); err != nil {
 		log.Fatalf("r1fs get_yaml: %v", err)
 	}
-	fmt.Println("yaml document:", yamlDoc.Data)
+	fmt.Println("yaml document:", yamlDoc)
 }
 ```
 
-> Prefer the per-package helpers `cstore.NewFromEnv` and `r1fs.NewFromEnv` to bootstrap clients. The legacy `ratio1_sdk.NewFromEnv` wrapper is still available if you want both handles at once.
+> Prefer the per-package helpers `cstore.NewFromEnv` and `r1fs.NewFromEnv` to bootstrap clients. These ensure each service can be initialised and tested independently.
 
 ## Examples
 

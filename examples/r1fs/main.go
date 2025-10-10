@@ -56,11 +56,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	yamlDoc, err := r1fs.GetYAML[map[string]any](ctx, client, cid, "")
-	if err != nil {
+	var yamlData map[string]any
+	if _, err := client.GetYAML(ctx, cid, "", &yamlData); err != nil {
 		panic(err)
 	}
-	fmt.Printf("yaml payload: %v\n", yamlDoc.Data)
+	fmt.Printf("yaml payload: %v\n", yamlData)
 }
 
 func newR1FSServer() *httptest.Server {

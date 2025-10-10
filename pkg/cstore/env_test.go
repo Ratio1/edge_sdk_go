@@ -40,7 +40,7 @@ func TestNewFromEnvHTTP(t *testing.T) {
 		t.Fatalf("expected http mode, got %q", mode)
 	}
 
-	item, err := cstore.Get[map[string]any](context.Background(), client, "missing")
+	item, err := client.Get(context.Background(), "missing", nil)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestNewFromEnvMockFallback(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := cstore.Put(ctx, client, "key", map[string]int{"count": 1}, nil); err != nil {
+	if _, err := client.Put(ctx, "key", map[string]int{"count": 1}, nil); err != nil {
 		t.Fatalf("mock Put: %v", err)
 	}
 }
@@ -82,12 +82,13 @@ func TestNewFromEnvSeed(t *testing.T) {
 		t.Fatalf("expected mock mode, got %q", mode)
 	}
 
-	item, err := cstore.Get[map[string]int](context.Background(), client, "foo")
+	var seeded map[string]int
+	item, err := client.Get(context.Background(), "foo", &seeded)
 	if err != nil {
 		t.Fatalf("Get seeded value: %v", err)
 	}
-	if item == nil || item.Value["answer"] != 42 {
-		t.Fatalf("unexpected seeded item: %#v", item)
+	if item == nil || seeded["answer"] != 42 {
+		t.Fatalf("unexpected seeded item: %#v value=%#v", item, seeded)
 	}
 }
 

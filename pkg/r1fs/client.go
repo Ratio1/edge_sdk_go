@@ -114,16 +114,26 @@ func (c *Client) AddYAML(ctx context.Context, data any, opts *YAMLOptions) (stri
 	return c.backend.AddYAML(ctx, data, filename, secret)
 }
 
-// GetYAML retrieves YAML content decoded into the requested type.
-func GetYAML[T any](ctx context.Context, client *Client, cid string, secret string) (*YAMLDocument[T], error) {
-	if client == nil {
+// GetYAML retrieves YAML content as raw JSON. Provide out to decode into a struct.
+func (c *Client) GetYAML(ctx context.Context, cid string, secret string, out any) (*YAMLDocument[json.RawMessage], error) {
+	if c == nil {
 		return nil, fmt.Errorf("r1fs: client is nil")
 	}
-	data, err := client.getYAMLRaw(ctx, cid, secret)
+	data, err := c.getYAMLRaw(ctx, cid, secret)
 	if err != nil {
 		return nil, err
 	}
-	return decodeYAMLDocument[T](cid, data)
+	doc, err := decodeYAMLDocument[json.RawMessage](cid, data)
+	if err != nil || doc == nil || out == nil {
+		return doc, err
+	}
+	if len(doc.Data) == 0 {
+		return doc, nil
+	}
+	if err := json.Unmarshal(doc.Data, out); err != nil {
+		return nil, fmt.Errorf("r1fs: decode YAML payload: %w", err)
+	}
+	return doc, nil
 }
 
 func (c *Client) getYAMLRaw(ctx context.Context, cid string, secret string) ([]byte, error) {

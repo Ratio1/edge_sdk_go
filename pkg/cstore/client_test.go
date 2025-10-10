@@ -145,26 +145,27 @@ func TestClientPutGetAndList(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := cstore.Put(ctx, client, "jobs:123", counter{Count: 1}, nil); err != nil {
+	if _, err := client.Put(ctx, "jobs:123", counter{Count: 1}, nil); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if _, err := cstore.Put(ctx, client, "jobs:124", counter{Count: 2}, nil); err != nil {
+	if _, err := client.Put(ctx, "jobs:124", counter{Count: 2}, nil); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 
-	if _, err := cstore.HSet(ctx, client, "jobs", "123", counter{Count: 3}, nil); err != nil {
+	if _, err := client.HSet(ctx, "jobs", "123", counter{Count: 3}, nil); err != nil {
 		t.Fatalf("HSet: %v", err)
 	}
 
-	item, err := cstore.Get[counter](ctx, client, "jobs:123")
+	var itemVal counter
+	item, err := client.Get(ctx, "jobs:123", &itemVal)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if item == nil || item.Value.Count != 1 {
-		t.Fatalf("Get returned unexpected item: %#v", item)
+	if item == nil || itemVal.Count != 1 {
+		t.Fatalf("Get returned unexpected item: %#v value=%#v", item, itemVal)
 	}
 
-	missing, err := cstore.Get[counter](ctx, client, "missing")
+	missing, err := client.Get(ctx, "missing", nil)
 	if err != nil {
 		t.Fatalf("Get missing: %v", err)
 	}
@@ -172,14 +173,15 @@ func TestClientPutGetAndList(t *testing.T) {
 		t.Fatalf("expected nil for missing key, got %#v", missing)
 	}
 
-	hItem, err := cstore.HGet[counter](ctx, client, "jobs", "123")
+	var hVal counter
+	hItem, err := client.HGet(ctx, "jobs", "123", &hVal)
 	if err != nil {
 		t.Fatalf("HGet: %v", err)
 	}
-	if hItem == nil || hItem.Value.Count != 3 || hItem.HashKey != "jobs" || hItem.Field != "123" {
-		t.Fatalf("HGet returned unexpected item: %#v", hItem)
+	if hItem == nil || hVal.Count != 3 || hItem.HashKey != "jobs" || hItem.Field != "123" {
+		t.Fatalf("HGet returned unexpected item: %#v value=%#v", hItem, hVal)
 	}
-	hMissing, err := cstore.HGet[counter](ctx, client, "jobs", "999")
+	hMissing, err := client.HGet(ctx, "jobs", "999", nil)
 	if err != nil {
 		t.Fatalf("HGet missing: %v", err)
 	}
@@ -187,14 +189,21 @@ func TestClientPutGetAndList(t *testing.T) {
 		t.Fatalf("expected nil for missing hash field, got %#v", hMissing)
 	}
 
-	all, err := cstore.HGetAll[counter](ctx, client, "jobs")
+	all, err := client.HGetAll(ctx, "jobs")
 	if err != nil {
 		t.Fatalf("HGetAll: %v", err)
 	}
-	if len(all) != 1 || all[0].Value.Count != 3 || all[0].Field != "123" {
+	if len(all) != 1 || all[0].Field != "123" {
 		t.Fatalf("HGetAll returned unexpected items: %#v", all)
 	}
-	emptyAll, err := cstore.HGetAll[counter](ctx, client, "missing-hash")
+	var allVal counter
+	if err := json.Unmarshal(all[0].Value, &allVal); err != nil {
+		t.Fatalf("HGetAll decode: %v", err)
+	}
+	if allVal.Count != 3 {
+		t.Fatalf("HGetAll decoded unexpected value: %#v", allVal)
+	}
+	emptyAll, err := client.HGetAll(ctx, "missing-hash")
 	if err != nil {
 		t.Fatalf("HGetAll missing: %v", err)
 	}
@@ -202,23 +211,37 @@ func TestClientPutGetAndList(t *testing.T) {
 		t.Fatalf("expected nil for missing hash, got %#v", emptyAll)
 	}
 
-	result, err := cstore.List[counter](ctx, client, "jobs:", "", 1)
+	result, err := client.List(ctx, "jobs:", "", 1)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(result.Items) != 1 || result.Items[0].Value.Count != 1 {
+	if len(result.Items) != 1 {
 		t.Fatalf("List page 1 mismatch: %#v", result)
+	}
+	var first counter
+	if err := json.Unmarshal(result.Items[0].Value, &first); err != nil {
+		t.Fatalf("List decode page1: %v", err)
+	}
+	if first.Count != 1 {
+		t.Fatalf("List page1 decoded mismatch: %#v", first)
 	}
 	if result.NextCursor == "" {
 		t.Fatalf("expected next cursor")
 	}
 
-	result2, err := cstore.List[counter](ctx, client, "jobs:", result.NextCursor, 1)
+	result2, err := client.List(ctx, "jobs:", result.NextCursor, 1)
 	if err != nil {
 		t.Fatalf("List page 2: %v", err)
 	}
-	if len(result2.Items) != 1 || result2.Items[0].Value.Count != 2 {
+	if len(result2.Items) != 1 {
 		t.Fatalf("List page 2 mismatch: %#v", result2)
+	}
+	var second counter
+	if err := json.Unmarshal(result2.Items[0].Value, &second); err != nil {
+		t.Fatalf("List decode page2: %v", err)
+	}
+	if second.Count != 2 {
+		t.Fatalf("List page2 decoded mismatch: %#v", second)
 	}
 	if result2.NextCursor != "" {
 		t.Fatalf("expected no more pages, got %q", result2.NextCursor)
@@ -238,11 +261,11 @@ func TestPutOptionsUnsupported(t *testing.T) {
 
 	ctx := context.Background()
 	ttl := 60
-	if _, err := cstore.Put(ctx, client, "key", counter{Count: 1}, &cstore.PutOptions{TTLSeconds: &ttl}); !errors.Is(err, cstore.ErrUnsupportedFeature) {
+	if _, err := client.Put(ctx, "key", counter{Count: 1}, &cstore.PutOptions{TTLSeconds: &ttl}); !errors.Is(err, cstore.ErrUnsupportedFeature) {
 		t.Fatalf("expected ErrUnsupportedFeature for TTL, got %v", err)
 	}
 
-	if _, err := cstore.Put(ctx, client, "key", counter{Count: 1}, &cstore.PutOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrUnsupportedFeature) {
+	if _, err := client.Put(ctx, "key", counter{Count: 1}, &cstore.PutOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrUnsupportedFeature) {
 		t.Fatalf("expected ErrUnsupportedFeature for IfAbsent, got %v", err)
 	}
 }

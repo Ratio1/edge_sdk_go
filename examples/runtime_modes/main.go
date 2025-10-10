@@ -15,11 +15,10 @@ import (
 
 	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
 	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
-	"github.com/Ratio1/ratio1_sdk_go/pkg/ratio1_sdk"
 )
 
 func main() {
-	fmt.Println("== HTTP mode via ratio1_sdk.NewFromEnv ==")
+	fmt.Println("== HTTP mode via env helpers ==")
 	if err := demoHTTP(); err != nil {
 		log.Fatalf("http demo: %v", err)
 	}
@@ -46,21 +45,21 @@ func demoHTTP() error {
 	})
 	defer unsetEnv("R1_RUNTIME_MODE", "EE_CHAINSTORE_API_URL", "EE_R1FS_API_URL")
 
-	cs, fs, mode, err := ratio1_sdk.NewFromEnv()
+	cs, fs, mode, err := bootstrapFromEnv()
 	if err != nil {
 		return err
 	}
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cstore.Put(ctx, cs, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
+	if _, err := cs.Put(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
 		return err
 	}
-	item, err := cstore.Get[map[string]any](ctx, cs, "jobs:1")
-	if err != nil {
+	var itemValue map[string]any
+	if _, err := cs.Get(ctx, "jobs:1", &itemValue); err != nil {
 		return err
 	}
-	fmt.Println("cstore get:", item.Value)
+	fmt.Println("cstore get:", itemValue)
 
 	data := []byte("hello http")
 	stat, err := fs.Upload(ctx, "/docs/http.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
@@ -83,31 +82,31 @@ func demoAuto() error {
 	})
 	defer unsetEnv("R1_RUNTIME_MODE", "EE_CHAINSTORE_API_URL", "EE_R1FS_API_URL")
 
-	cs, fs, mode, err := ratio1_sdk.NewFromEnv()
+	cs, fs, mode, err := bootstrapFromEnv()
 	if err != nil {
 		return err
 	}
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cstore.HSet(ctx, cs, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
+	if _, err := cs.HSet(ctx, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
 		return err
 	}
-	hItem, err := cstore.HGet[map[string]int](ctx, cs, "jobs", "1")
-	if err != nil {
+	var hItemValue map[string]int
+	if _, err := cs.HGet(ctx, "jobs", "1", &hItemValue); err != nil {
 		return err
 	}
-	fmt.Println("cstore hget:", hItem.Value)
+	fmt.Println("cstore hget:", hItemValue)
 
 	cid, err := fs.AddYAML(ctx, map[string]string{"env": "auto"}, &r1fs.YAMLOptions{Filename: "env.yaml"})
 	if err != nil {
 		return err
 	}
-	yaml, err := r1fs.GetYAML[map[string]string](ctx, fs, cid, "")
-	if err != nil {
+	var yamlData map[string]string
+	if _, err := fs.GetYAML(ctx, cid, "", &yamlData); err != nil {
 		return err
 	}
-	fmt.Println("r1fs get_yaml:", yaml.Data)
+	fmt.Println("r1fs get_yaml:", yamlData)
 
 	return nil
 }
@@ -118,22 +117,26 @@ func demoMock() error {
 	})
 	defer unsetEnv("R1_RUNTIME_MODE")
 
-	cs, fs, mode, err := ratio1_sdk.NewFromEnv()
+	cs, fs, mode, err := bootstrapFromEnv()
 	if err != nil {
 		return err
 	}
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cstore.Put(ctx, cs, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
+	if _, err := cs.Put(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
 		return err
 	}
-	list, err := cstore.List[map[string]string](ctx, cs, "", "", 0)
+	list, err := cs.List(ctx, "", "", 0)
 	if err != nil {
 		return err
 	}
 	for _, item := range list.Items {
-		fmt.Printf("mock cstore item %s -> %v\n", item.Key, item.Value)
+		var value map[string]string
+		if err := json.Unmarshal(item.Value, &value); err != nil {
+			return fmt.Errorf("decode list item %s: %w", item.Key, err)
+		}
+		fmt.Printf("mock cstore item %s -> %v\n", item.Key, value)
 	}
 
 	content := []byte("mock payload")
@@ -162,6 +165,25 @@ func unsetEnv(keys ...string) {
 	for _, k := range keys {
 		_ = os.Unsetenv(k)
 	}
+}
+
+func bootstrapFromEnv() (*cstore.Client, *r1fs.Client, string, error) {
+	cs, cMode, err := cstore.NewFromEnv()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("bootstrap cstore: %w", err)
+	}
+	fs, fMode, err := r1fs.NewFromEnv()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("bootstrap r1fs: %w", err)
+	}
+	mode := cMode
+	if mode == "" {
+		mode = fMode
+	}
+	if cMode != "" && fMode != "" && cMode != fMode {
+		return nil, nil, "", fmt.Errorf("resolve runtime mode: mismatch (cstore=%s, r1fs=%s)", cMode, fMode)
+	}
+	return cs, fs, mode, nil
 }
 
 func newSandboxServer() *httptest.Server {

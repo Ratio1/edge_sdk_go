@@ -8,7 +8,7 @@
 
 # Roles
 - Repo Architect
-  - Define package boundaries (`internal/httpx`, `pkg/cstore`, `pkg/r1fs`, `pkg/ratio1_sdk`).
+  - Define package boundaries (`internal/httpx`, `pkg/cstore`, `pkg/r1fs`).
   - Maintain low dependency surface, consistent error types, Makefile, CI.
 - SDK Author
   - Keep HTTP clients aligned with upstream Python APIs.

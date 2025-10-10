@@ -28,14 +28,14 @@ func main() {
 	ctx := context.Background()
 
 	fmt.Println("== Put/Get ==")
-	if _, err := cstore.Put(ctx, client, "jobs:1", counter{Count: 1}, nil); err != nil {
+	if _, err := client.Put(ctx, "jobs:1", counter{Count: 1}, nil); err != nil {
 		panic(err)
 	}
-	item, err := cstore.Get[counter](ctx, client, "jobs:1")
-	if err != nil {
+	var itemValue counter
+	if _, err := client.Get(ctx, "jobs:1", &itemValue); err != nil {
 		panic(err)
 	}
-	fmt.Printf("jobs:1 => %+v\n", item.Value)
+	fmt.Printf("jobs:1 => %+v\n", itemValue)
 
 	fmt.Println("\n== PutJSON/GetJSON ==")
 	if _, err := client.PutJSON(ctx, "jobs:meta", `{"owner":"alice"}`, nil); err != nil {
@@ -48,41 +48,53 @@ func main() {
 	fmt.Printf("jobs:meta raw JSON: %s\n", string(jsonBytes))
 
 	fmt.Println("\n== List with pagination ==")
-	page, err := cstore.List[counter](ctx, client, "jobs:", "", 1)
+	page, err := client.List(ctx, "jobs:", "", 1)
 	if err != nil {
 		panic(err)
 	}
 	for _, it := range page.Items {
-		fmt.Printf("page1 -> %s: %+v\n", it.Key, it.Value)
+		var value counter
+		if err := json.Unmarshal(it.Value, &value); err != nil {
+			panic(err)
+		}
+		fmt.Printf("page1 -> %s: %+v\n", it.Key, value)
 	}
 	if page.NextCursor != "" {
-		page2, err := cstore.List[counter](ctx, client, "jobs:", page.NextCursor, 1)
+		page2, err := client.List(ctx, "jobs:", page.NextCursor, 1)
 		if err != nil {
 			panic(err)
 		}
 		for _, it := range page2.Items {
-			fmt.Printf("page2 -> %s: %+v\n", it.Key, it.Value)
+			var value counter
+			if err := json.Unmarshal(it.Value, &value); err != nil {
+				panic(err)
+			}
+			fmt.Printf("page2 -> %s: %+v\n", it.Key, value)
 		}
 	}
 
 	fmt.Println("\n== Hash operations (HSet/HGet/HGetAll) ==")
-	if _, err := cstore.HSet(ctx, client, "h:jobs", "1", map[string]string{"status": "queued"}, nil); err != nil {
+	if _, err := client.HSet(ctx, "h:jobs", "1", map[string]string{"status": "queued"}, nil); err != nil {
 		panic(err)
 	}
-	hItem, err := cstore.HGet[map[string]string](ctx, client, "h:jobs", "1")
-	if err != nil {
+	var hValue map[string]string
+	if _, err := client.HGet(ctx, "h:jobs", "1", &hValue); err != nil {
 		panic(err)
 	}
-	fmt.Println("field 1 ->", hItem.Value)
-	if _, err := cstore.HSet(ctx, client, "h:jobs", "2", map[string]string{"status": "running"}, nil); err != nil {
+	fmt.Println("field 1 ->", hValue)
+	if _, err := client.HSet(ctx, "h:jobs", "2", map[string]string{"status": "running"}, nil); err != nil {
 		panic(err)
 	}
-	hItems, err := cstore.HGetAll[map[string]string](ctx, client, "h:jobs")
+	hItems, err := client.HGetAll(ctx, "h:jobs")
 	if err != nil {
 		panic(err)
 	}
 	for _, it := range hItems {
-		fmt.Printf("hash %s field %s -> %v\n", it.HashKey, it.Field, it.Value)
+		var value map[string]string
+		if err := json.Unmarshal(it.Value, &value); err != nil {
+			panic(err)
+		}
+		fmt.Printf("hash %s field %s -> %v\n", it.HashKey, it.Field, value)
 	}
 }
 
