@@ -13,6 +13,15 @@ type Item[T any] struct {
 	ExpiresAt *time.Time
 }
 
+// HashItem represents a field stored under a hash key.
+type HashItem[T any] struct {
+	HashKey   string
+	Field     string
+	Value     T
+	ETag      string
+	ExpiresAt *time.Time
+}
+
 // PutOptions controls write semantics for Put operations.
 type PutOptions struct {
 	TTLSeconds  *int

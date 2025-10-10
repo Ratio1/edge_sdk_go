@@ -10,7 +10,7 @@ The library mirrors the FastAPI plugins shipped in the Ratio1 edge node:
 - [`cstore_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py)
 - [`r1fs_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py)
 
-When the official APIs lack features (TTL headers, full directory listings, deletes), the SDK documents the gap with TODO markers and returns `ErrUnsupportedFeature` where appropriate.
+When the official APIs lack features (TTL headers, directory listings, deletes), the SDK documents the gap with TODO markers and either omits the surface or returns `ErrUnsupportedFeature` where appropriate.
 
 ## Install
 
@@ -30,23 +30,19 @@ go get github.com/Ratio1/ratio1_sdk_go
 
 ## Quick start
 
-### HTTP mode
+The helpers `cstore.NewFromEnv` and `r1fs.NewFromEnv` read the standard Ratio1
+environment variables and return ready-to-use clients. Modes behave as follows:
+
+- `http` – connect to the live REST managers (`EE_CHAINSTORE_API_URL`, `EE_R1FS_API_URL`).
+- `auto` – use HTTP when both URLs are set, otherwise fall back to mocks.
+- `mock` – in-memory stores, optionally seeded via `R1_MOCK_CSTORE_SEED` and `R1_MOCK_R1FS_SEED`.
+
+The examples folder contains runnable programs covering each scenario:
 
 ```bash
-export R1_RUNTIME_MODE=http
-export EE_CHAINSTORE_API_URL=https://example-node/cstore
-export EE_R1FS_API_URL=https://example-node/r1fs
-
-go run ./examples/basic_http
-```
-
-### Mock mode
-
-```bash
-unset EE_CHAINSTORE_API_URL EE_R1FS_API_URL
-export R1_RUNTIME_MODE=mock
-
-go run ./examples/basic_mock
+go run ./examples/runtime_modes   # demonstrates http/auto/mock initialisation
+go run ./examples/cstore          # walks through every cstore API
+go run ./examples/r1fs            # showcases the r1fs API surface
 ```
 
 ### Sandbox server
@@ -67,10 +63,10 @@ chmod +x ratio1-sandbox
 
 Windows users can download `ratio1-sandbox_windows_amd64.zip`, unzip it, and run `ratio1-sandbox.exe`.
 
-Copy the `export` lines that the server prints into your shell (or redirect them into a file and `source` it) and then run your application or the examples:
+Copy the `export` lines that the server prints into your shell (or redirect them into a file and `source` it) and then run your application or any of the examples:
 
 ```bash
-go run ./examples/basic_http
+go run ./examples/runtime_modes
 ```
 
 #### Run from source
@@ -88,7 +84,7 @@ go run ./cmd/ratio1-sandbox --addr :8787
 - `--latency 200ms` – inject fixed latency before every request.
 - `--fail rate=0.05,code=500` – randomly inject HTTP failures.
 
-The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (`/set`, `/get`, `/get_status` for CStore; `/add_file_base64`, `/get_file_base64`, `/get_status_r1fs` for R1FS). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
+The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/get_status_r1fs`). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
 
 ## Usage snippets
 
@@ -98,12 +94,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 
 	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
 	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
-	"github.com/Ratio1/ratio1_sdk_go/pkg/ratio1_sdk"
 )
 
 type Counter struct {
@@ -112,42 +108,88 @@ type Counter struct {
 
 func main() {
 	ctx := context.Background()
-	cs, fs, mode, err := ratio1_sdk.NewFromEnv()
+	cs, cMode, err := cstore.NewFromEnv()
 	if err != nil {
-		log.Fatalf("bootstrap clients: %v", err)
+		log.Fatalf("bootstrap cstore: %v", err)
 	}
-	fmt.Println("mode:", mode)
-
-	counter := Counter{Count: 1}
-	_, err = cstore.Put(ctx, cs, "jobs:123", counter, &cstore.PutOptions{})
+	fs, fMode, err := r1fs.NewFromEnv()
 	if err != nil {
+		log.Fatalf("bootstrap r1fs: %v", err)
+	}
+	fmt.Println("modes:", cMode, fMode)
+
+	// Key/value primitives
+	counter := Counter{Count: 1}
+	if _, err := cs.Put(ctx, "jobs:123", counter, nil); err != nil {
 		log.Fatalf("cstore put: %v", err)
 	}
-	fmt.Println("saved counter")
-
-	item, err := cstore.Get[Counter](ctx, cs, "jobs:123")
-	if err != nil {
+	var stored Counter
+	if _, err := cs.Get(ctx, "jobs:123", &stored); err != nil {
 		log.Fatalf("cstore get: %v", err)
 	}
+	fmt.Println("retrieved counter:", stored.Count)
 
-	fmt.Println("retrieved counter from cstore:", item.Value.Count)
+	if _, err := cs.PutJSON(ctx, "jobs:meta", `{"owner":"alice"}`, nil); err != nil {
+		log.Fatalf("cstore put json: %v", err)
+	}
+	raw, err := cs.GetJSON(ctx, "jobs:meta")
+	if err != nil {
+		log.Fatalf("cstore get json: %v", err)
+	}
+	fmt.Println("raw metadata:", string(raw))
 
-	buf := new(bytes.Buffer)
-	buf.WriteString(`{"ok":true}`)
-	payload := []byte(`{"ok":true}`)
-	stat, err := fs.Upload(ctx, "/outputs/result.json", bytes.NewReader(payload), int64(len(payload)), &r1fs.UploadOptions{ContentType: "application/json"})
+	if _, err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
+		log.Fatalf("cstore hset: %v", err)
+	}
+	hItems, err := cs.HGetAll(ctx, "jobs")
+	if err != nil {
+		log.Fatalf("cstore hgetall: %v", err)
+	}
+	for _, item := range hItems {
+		var value map[string]string
+		if err := json.Unmarshal(item.Value, &value); err != nil {
+			log.Fatalf("decode hash field %s: %v", item.Field, err)
+		}
+		fmt.Printf("hash %s -> %v\n", item.Field, value)
+	}
+
+	// File primitives
+	data := []byte(`{"ok":true}`)
+	stat, err := fs.AddFileBase64(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
 	if err != nil {
 		log.Fatalf("r1fs upload: %v", err)
 	}
-	fmt.Printf("uploaded %s (%d bytes)\n", stat.Path, stat.Size)
+	fmt.Printf("uploaded CID: %s\n", stat.Path)
 
-	var out bytes.Buffer
-	if _, err := fs.Download(ctx, stat.Path, &out); err != nil {
-		log.Fatalf("r1fs download: %v", err)
+	fileStat, err := fs.AddFile(ctx, "artifact.bin", bytes.NewReader([]byte{0xde, 0xad}), 2, nil)
+	if err != nil {
+		log.Fatalf("r1fs add_file: %v", err)
 	}
-	fmt.Printf("downloaded: %q\n", out.String())
+	loc, err := fs.GetFile(ctx, fileStat.Path, "")
+	if err != nil {
+		log.Fatalf("r1fs get_file: %v", err)
+	}
+	fmt.Printf("file stored at: %s (filename=%s)\n", loc.Path, loc.Filename)
+
+	cid, err := fs.AddYAML(ctx, map[string]any{"service": "r1fs", "enabled": true}, &r1fs.YAMLOptions{Filename: "config.yaml"})
+	if err != nil {
+		log.Fatalf("r1fs add_yaml: %v", err)
+	}
+	var yamlDoc map[string]any
+	if _, err := fs.GetYAML(ctx, cid, "", &yamlDoc); err != nil {
+		log.Fatalf("r1fs get_yaml: %v", err)
+	}
+	fmt.Println("yaml document:", yamlDoc)
 }
 ```
+
+> Prefer the per-package helpers `cstore.NewFromEnv` and `r1fs.NewFromEnv` to bootstrap clients. These ensure each service can be initialised and tested independently.
+
+## Examples
+
+- `examples/runtime_modes` – spins up local test servers and shows how `http`, `auto`, and `mock` resolution behaves.
+- `examples/cstore` – exercises every public CStore helper including JSON and hash utilities.
+- `examples/r1fs` – demonstrates uploads, metadata lookups, and YAML helpers against a simulated manager.
 
 ## Development
 
@@ -162,7 +204,7 @@ make tag VERSION=v0.1.0
 
 ## Limitations & TODOs
 
-- Upstream APIs currently lack TTL, delete, and list support. The SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
+- The CStore REST manager still lacks TTL and conditional write headers; the SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
 - R1FS streaming is implemented via base64 payloads; a TODO tracks upgrading to streaming uploads when supported.
 - CStore `Put` ignores TTL/conditional headers until the REST manager accepts them.
 
