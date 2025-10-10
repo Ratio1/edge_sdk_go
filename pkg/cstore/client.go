@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
@@ -442,6 +443,42 @@ func encodeJSON(payload any) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
+func coerceBool(value any) (bool, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return false, fmt.Errorf("empty string")
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, err
+		}
+		return b, nil
+	case float64:
+		return v != 0, nil
+	case json.Number:
+		i, err := v.Int64()
+		if err != nil {
+			return false, err
+		}
+		return i != 0, nil
+	case nil:
+		return false, fmt.Errorf("nil result")
+	default:
+		return false, fmt.Errorf("unexpected type %T", v)
+	}
+}
+
+func decodeBoolResult(body []byte) (bool, error) {
+	var raw any
+	if err := ratio1api.DecodeResult(body, &raw); err != nil {
+		return false, err
+	}
+	return coerceBool(raw)
+}
+
 type Backend interface {
 	GetRaw(ctx context.Context, key string) ([]byte, error)
 	PutRaw(ctx context.Context, key string, raw []byte, opts *PutOptions) (*Item[json.RawMessage], error)
@@ -506,7 +543,17 @@ func (b *httpBackend) PutRaw(ctx context.Context, key string, raw []byte, opts *
 	if err != nil {
 		return nil, err
 	}
-	_ = resp.Body.Close()
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := decodeBoolResult(payloadBytes)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: decode set response: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("cstore: set rejected by upstream")
+	}
 	return nil, nil
 }
 
@@ -586,7 +633,17 @@ func (b *httpBackend) HSetRaw(ctx context.Context, hashKey, field string, raw []
 	if err != nil {
 		return nil, err
 	}
-	_ = resp.Body.Close()
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	ok, err := decodeBoolResult(payloadBytes)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: decode hset response: %w", err)
+	}
+	if !ok {
+		return nil, fmt.Errorf("cstore: hset rejected by upstream")
+	}
 	return nil, nil
 }
 

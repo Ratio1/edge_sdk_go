@@ -165,23 +165,28 @@ func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, size i
 	return stat, nil
 }
 
-// GetFileBase64 returns stored file contents as bytes.
-func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) ([]byte, error) {
+// GetFileBase64 returns stored file contents and filename.
+func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) ([]byte, string, error) {
 	if strings.TrimSpace(cid) == "" {
-		return nil, fmt.Errorf("mock r1fs: cid is required")
+		return nil, "", fmt.Errorf("mock r1fs: cid is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	m.mu.RLock()
-	entry, ok := m.files[normalizePath(cid)]
+	norm := normalizePath(cid)
+	entry, ok := m.files[norm]
+	filename := m.fileNames[cid]
 	m.mu.RUnlock()
 	if !ok {
-		return nil, r1fs.ErrNotFound
+		return nil, "", r1fs.ErrNotFound
+	}
+	if filename == "" {
+		filename = strings.TrimPrefix(norm, "/")
 	}
 
-	return append([]byte(nil), entry.data...), nil
+	return append([]byte(nil), entry.data...), filename, nil
 }
 
 // GetFile resolves metadata for a stored CID.

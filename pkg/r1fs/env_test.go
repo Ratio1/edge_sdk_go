@@ -40,7 +40,7 @@ func TestNewFromEnvHTTP(t *testing.T) {
 		t.Fatalf("expected http mode, got %q", mode)
 	}
 
-	if _, err := client.GetFileBase64(context.Background(), "/missing", ""); err != nil {
+	if _, _, err := client.GetFileBase64(context.Background(), "/missing", ""); err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
 	}
 }
@@ -83,7 +83,7 @@ func TestNewFromEnvSeed(t *testing.T) {
 		t.Fatalf("expected mock mode, got %q", mode)
 	}
 
-	payload, err := client.GetFileBase64(context.Background(), "/seed.txt", "")
+	payload, _, err := client.GetFileBase64(context.Background(), "/seed.txt", "")
 	if err != nil {
 		t.Fatalf("GetFileBase64 seed: %v", err)
 	}

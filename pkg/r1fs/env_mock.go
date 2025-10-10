@@ -106,21 +106,26 @@ func (m *mockFS) upload(ctx context.Context, path string, data []byte, size int6
 	return buildStat(norm, entry, chooseSize(size, int64(len(data)))), nil
 }
 
-func (m *mockFS) getFileBase64(ctx context.Context, cid string, _ string) ([]byte, error) {
+func (m *mockFS) getFileBase64(ctx context.Context, cid string, _ string) ([]byte, string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if strings.TrimSpace(cid) == "" {
-		return nil, fmt.Errorf("mock r1fs: cid is required")
+		return nil, "", fmt.Errorf("mock r1fs: cid is required")
 	}
 
 	m.mu.RLock()
-	entry, ok := m.files[normalizePath(cid)]
+	norm := normalizePath(cid)
+	entry, ok := m.files[norm]
+	filename := m.fileNames[cid]
 	m.mu.RUnlock()
 	if !ok {
-		return nil, ErrNotFound
+		return nil, "", ErrNotFound
 	}
-	return append([]byte(nil), entry.data...), nil
+	if filename == "" {
+		filename = strings.TrimPrefix(norm, "/")
+	}
+	return append([]byte(nil), entry.data...), filename, nil
 }
 
 func (m *mockFS) addFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, string, error) {

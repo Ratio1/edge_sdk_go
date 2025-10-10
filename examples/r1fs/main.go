@@ -34,11 +34,11 @@ func main() {
 	}
 	fmt.Printf("uploaded CID: %s size: %d\n", stat.Path, stat.Size)
 
-	data, err := client.GetFileBase64(ctx, stat.Path, "")
+	data, filename, err := client.GetFileBase64(ctx, stat.Path, "")
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("downloaded contents: %q\n", string(data))
+	fmt.Printf("downloaded contents: %q (filename: %s)\n", string(data), filename)
 
 	fmt.Println("\n== AddFile (multipart) and GetFile metadata ==")
 	fileStat, err := client.AddFile(ctx, "report.bin", bytes.NewReader([]byte{0xde, 0xad, 0xbe, 0xef}), 4, &r1fs.UploadOptions{Metadata: map[string]string{"origin": "example"}})

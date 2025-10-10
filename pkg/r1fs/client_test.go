@@ -199,12 +199,15 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 		t.Fatalf("AddFileBase64 returned invalid stat: %#v", stat)
 	}
 
-	content, err := client.GetFileBase64(ctx, stat.Path, "")
+	content, filename, err := client.GetFileBase64(ctx, stat.Path, "")
 	if err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
 	}
 	if string(content) != "hello world" {
 		t.Fatalf("GetFileBase64 mismatch: %q", string(content))
+	}
+	if filename != "download.bin" {
+		t.Fatalf("GetFileBase64 filename mismatch: %q", filename)
 	}
 
 	streamPayload := strings.NewReader("stream upload")

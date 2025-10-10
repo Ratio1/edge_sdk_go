@@ -27,9 +27,12 @@ func TestMockAddFileBase64AndGetFileBase64(t *testing.T) {
 		t.Fatalf("unexpected add_file_base64 stat: %#v", stat)
 	}
 
-	payload, err := m.GetFileBase64(ctx, stat.Path, "")
+	payload, filename, err := m.GetFileBase64(ctx, stat.Path, "")
 	if err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
+	}
+	if filename == "" {
+		t.Fatalf("expected filename, got empty")
 	}
 	if !bytes.Equal(payload, data) {
 		t.Fatalf("get mismatch: %q", payload)
@@ -61,12 +64,15 @@ func TestMockSeed(t *testing.T) {
 		t.Fatalf("Seed: %v", err)
 	}
 
-	payload, err := m.GetFileBase64(context.Background(), "/seed/one.txt", "")
+	payload, filename, err := m.GetFileBase64(context.Background(), "/seed/one.txt", "")
 	if err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
 	}
 	if string(payload) != "hello" {
 		t.Fatalf("unexpected payload: %q", payload)
+	}
+	if filename == "" {
+		t.Fatalf("expected filename for seeded file")
 	}
 }
 

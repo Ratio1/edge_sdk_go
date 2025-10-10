@@ -364,14 +364,13 @@ func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 		http.Error(w, "cid is required", http.StatusBadRequest)
 		return
 	}
-	data, err := fs.GetFileBase64(r.Context(), payload.CID, "")
+	data, filename, err := fs.GetFileBase64(r.Context(), payload.CID, "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	filename := strings.TrimPrefix(payload.CID, "/")
-	if loc, err := fs.GetFile(r.Context(), payload.CID, ""); err == nil && loc != nil && loc.Filename != "" {
-		filename = loc.Filename
+	if filename == "" {
+		filename = strings.TrimPrefix(payload.CID, "/")
 	}
 	writeResult(w, map[string]any{
 		"file_base64_str": base64.StdEncoding.EncodeToString(data),

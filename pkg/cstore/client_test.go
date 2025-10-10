@@ -269,3 +269,31 @@ func TestPutOptionsUnsupported(t *testing.T) {
 		t.Fatalf("expected ErrUnsupportedFeature for IfAbsent, got %v", err)
 	}
 }
+
+func TestClientWriteRejectsFalseResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/set":
+			io.WriteString(w, `{"result": false}`)
+		case "/hset":
+			io.WriteString(w, `false`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := cstore.New(srv.URL)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := client.Put(context.Background(), "jobs:1", counter{Count: 1}, nil); err == nil {
+		t.Fatalf("expected error for rejected set")
+	}
+
+	if _, err := client.HSet(context.Background(), "jobs", "1", counter{Count: 2}, nil); err == nil {
+		t.Fatalf("expected error for rejected hset")
+	}
+}

@@ -71,13 +71,13 @@ func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, s
 	return c.backend.AddFile(ctx, filename, payload, size, opts)
 }
 
-// GetFileBase64 retrieves and decodes data via /get_file_base64.
-func (c *Client) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error) {
+// GetFileBase64 retrieves and decodes data via /get_file_base64, returning the upstream filename.
+func (c *Client) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {
 	if strings.TrimSpace(cid) == "" {
-		return nil, fmt.Errorf("r1fs: cid is required")
+		return nil, "", fmt.Errorf("r1fs: cid is required")
 	}
 	if c == nil || c.backend == nil {
-		return nil, fmt.Errorf("r1fs: client is nil")
+		return nil, "", fmt.Errorf("r1fs: client is nil")
 	}
 	return c.backend.GetFileBase64(ctx, cid, secret)
 }
@@ -217,7 +217,7 @@ func decodeYAMLDocument[T any](cid string, data []byte) (*YAMLDocument[T], error
 type Backend interface {
 	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
 	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
-	GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error)
+	GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error)
 	GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error)
 	AddYAML(ctx context.Context, data any, filename string, secret string) (string, error)
 	GetYAML(ctx context.Context, cid string, secret string) ([]byte, error)
@@ -365,9 +365,9 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 	return stat, nil
 }
 
-func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error) {
+func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {
 	if b == nil || b.client == nil {
-		return nil, fmt.Errorf("r1fs: http backend not configured")
+		return nil, "", fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := map[string]any{
 		"cid": cid,
@@ -377,7 +377,7 @@ func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret stri
 	}
 	jsonBody, err := encodeJSON(body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req := &httpx.Request{
 		Method: http.MethodPost,
@@ -390,23 +390,24 @@ func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret stri
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var result struct {
 		FileBase64 string `json:"file_base64_str"`
+		Filename   string `json:"filename"`
 	}
 	if err := ratio1api.DecodeResult(payloadBytes, &result); err != nil {
-		return nil, fmt.Errorf("r1fs: decode get_file_base64 response: %w", err)
+		return nil, "", fmt.Errorf("r1fs: decode get_file_base64 response: %w", err)
 	}
 	data, err := base64.StdEncoding.DecodeString(result.FileBase64)
 	if err != nil {
-		return nil, fmt.Errorf("r1fs: decode base64 payload: %w", err)
+		return nil, "", fmt.Errorf("r1fs: decode base64 payload: %w", err)
 	}
-	return data, nil
+	return data, result.Filename, nil
 }
 
 func (b *httpBackend) GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error) {

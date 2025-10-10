@@ -72,7 +72,7 @@ func (b *mockBackend) AddFileBase64(ctx context.Context, filename string, data [
 	return b.store.addFileBase64(ctx, filename, data, size, opts)
 }
 
-func (b *mockBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, error) {
+func (b *mockBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {
 	return b.store.getFileBase64(ctx, cid, secret)
 }
 
