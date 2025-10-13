@@ -228,8 +228,8 @@ func handleCStoreSet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		return
 	}
 	var payload struct {
-		Key   string          `json:"key"`
-		Value json.RawMessage `json:"value"`
+		Key   string `json:"key"`
+		Value any    `json:"value"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
@@ -239,15 +239,7 @@ func handleCStoreSet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		writeError(w, http.StatusBadRequest, "key is required", nil)
 		return
 	}
-	value, err := decodeJSONPayload(payload.Value)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid value", err)
-		return
-	}
-	if value == nil {
-		value = json.RawMessage("null")
-	}
-	if _, err := cstoremock.Set(r.Context(), store, payload.Key, value, nil); err != nil {
+	if _, err := cstoremock.Set(r.Context(), store, payload.Key, payload.Value, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore set failed", err)
 		return
 	}
@@ -264,7 +256,7 @@ func handleCStoreGet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		writeError(w, http.StatusBadRequest, "missing key parameter", nil)
 		return
 	}
-	item, err := cstoremock.Get[json.RawMessage](r.Context(), store, key)
+	item, err := cstoremock.Get[any](r.Context(), store, key)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore get failed", err)
 		return
@@ -273,7 +265,7 @@ func handleCStoreGet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		writeResult(w, nil)
 		return
 	}
-	writeResult(w, string(item.Value))
+	writeResult(w, item.Value)
 }
 
 func handleCStoreHSet(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
@@ -282,9 +274,9 @@ func handleCStoreHSet(w http.ResponseWriter, r *http.Request, store *cstoremock.
 		return
 	}
 	var payload struct {
-		HashKey string          `json:"hkey"`
-		Field   string          `json:"key"`
-		Value   json.RawMessage `json:"value"`
+		HashKey string `json:"hkey"`
+		Field   string `json:"key"`
+		Value   any    `json:"value"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
@@ -294,15 +286,8 @@ func handleCStoreHSet(w http.ResponseWriter, r *http.Request, store *cstoremock.
 		writeError(w, http.StatusBadRequest, "hkey and key are required", nil)
 		return
 	}
-	value, err := decodeJSONPayload(payload.Value)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid value", err)
-		return
-	}
-	if value == nil {
-		value = json.RawMessage("null")
-	}
-	if _, err := cstoremock.HSet(r.Context(), store, payload.HashKey, payload.Field, value, nil); err != nil {
+
+	if _, err := cstoremock.HSet(r.Context(), store, payload.HashKey, payload.Field, payload.Value, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore hset failed", err)
 		return
 	}
@@ -320,7 +305,7 @@ func handleCStoreHGet(w http.ResponseWriter, r *http.Request, store *cstoremock.
 		writeError(w, http.StatusBadRequest, "hkey and key are required", nil)
 		return
 	}
-	item, err := cstoremock.HGet[json.RawMessage](r.Context(), store, hashKey, field)
+	item, err := cstoremock.HGet[any](r.Context(), store, hashKey, field)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore hget failed", err)
 		return
@@ -329,7 +314,7 @@ func handleCStoreHGet(w http.ResponseWriter, r *http.Request, store *cstoremock.
 		writeResult(w, nil)
 		return
 	}
-	writeResult(w, string(item.Value))
+	writeResult(w, item.Value)
 }
 
 func handleCStoreHGetAll(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
@@ -342,7 +327,7 @@ func handleCStoreHGetAll(w http.ResponseWriter, r *http.Request, store *cstoremo
 		writeError(w, http.StatusBadRequest, "hkey is required", nil)
 		return
 	}
-	items, err := cstoremock.HGetAll[json.RawMessage](r.Context(), store, hashKey)
+	items, err := cstoremock.HGetAll[string](r.Context(), store, hashKey)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore hgetall failed", err)
 		return
@@ -353,7 +338,7 @@ func handleCStoreHGetAll(w http.ResponseWriter, r *http.Request, store *cstoremo
 	}
 	result := make(map[string]string, len(items))
 	for _, item := range items {
-		result[item.Field] = string(item.Value)
+		result[item.Field] = item.Value
 	}
 	writeResult(w, result)
 }
@@ -597,33 +582,6 @@ func writeError(w http.ResponseWriter, status int, message string, err error) {
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		log.Printf("sandbox: encode error response error: %v", err)
 	}
-}
-
-func decodeJSONPayload(raw json.RawMessage) (json.RawMessage, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, nil
-	}
-	if trimmed[0] != '"' {
-		return append([]byte(nil), trimmed...), nil
-	}
-	var inner string
-	if err := json.Unmarshal(trimmed, &inner); err != nil {
-		return nil, err
-	}
-	inner = strings.TrimSpace(inner)
-	if inner == "" || strings.EqualFold(inner, "null") {
-		return json.RawMessage("null"), nil
-	}
-	var candidate json.RawMessage
-	if err := json.Unmarshal([]byte(inner), &candidate); err == nil {
-		return candidate, nil
-	}
-	encoded, err := json.Marshal(inner)
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(encoded), nil
 }
 
 func parseFailConfig(raw string) (failConfig, error) {
