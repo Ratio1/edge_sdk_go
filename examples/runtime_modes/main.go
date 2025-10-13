@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
@@ -191,29 +193,52 @@ func bootstrapFromEnv() (*cstore.Client, *r1fs.Client, string, error) {
 
 func newSandboxServer() *httptest.Server {
 	type fileRecord struct {
-		Data     []byte
-		Filename string
+		Data        []byte
+		Filename    string
+		Secret      string
+		Metadata    map[string]string
+		ContentType string
+	}
+	type yamlRecord struct {
+		Data   json.RawMessage
+		Secret string
 	}
 
 	var (
-		mu      sync.Mutex
-		kvStore = map[string]any{}
-		files   = map[string]fileRecord{}
+		mu        sync.Mutex
+		kvStore   = map[string]json.RawMessage{}
+		hashStore = map[string]map[string]json.RawMessage{}
+		files     = map[string]fileRecord{}
+		yamlDocs  = map[string]yamlRecord{}
+		nextCID   int
 	)
+
+	newCID := func() string {
+		nextCID++
+		return fmt.Sprintf("/cid/%08d", nextCID)
+	}
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/set":
 			var req struct {
-				Key   string `json:"key"`
-				Value any    `json:"value"`
+				Key   string          `json:"key"`
+				Value json.RawMessage `json:"value"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			if strings.TrimSpace(req.Key) == "" {
+				http.Error(w, "key is required", http.StatusBadRequest)
+				return
+			}
+			value := json.RawMessage(bytes.TrimSpace(req.Value))
+			if len(value) == 0 {
+				value = json.RawMessage("null")
+			}
 			mu.Lock()
-			kvStore[req.Key] = req.Value
+			kvStore[req.Key] = append([]byte(nil), value...)
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte("true"))
@@ -228,7 +253,76 @@ func newSandboxServer() *httptest.Server {
 				_, _ = w.Write([]byte("null"))
 				return
 			}
-			resp := map[string]any{"result": value}
+			resp := map[string]any{"result": json.RawMessage(value)}
+			_ = json.NewEncoder(w).Encode(resp)
+
+		case "/hset":
+			var req struct {
+				HashKey string          `json:"hkey"`
+				Field   string          `json:"key"`
+				Value   json.RawMessage `json:"value"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if strings.TrimSpace(req.HashKey) == "" || strings.TrimSpace(req.Field) == "" {
+				http.Error(w, "hkey and key are required", http.StatusBadRequest)
+				return
+			}
+			value := json.RawMessage(bytes.TrimSpace(req.Value))
+			if len(value) == 0 {
+				value = json.RawMessage("null")
+			}
+			mu.Lock()
+			bucket := hashStore[req.HashKey]
+			if bucket == nil {
+				bucket = make(map[string]json.RawMessage)
+				hashStore[req.HashKey] = bucket
+			}
+			bucket[req.Field] = append([]byte(nil), value...)
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("true"))
+
+		case "/hget":
+			hkey := r.URL.Query().Get("hkey")
+			field := r.URL.Query().Get("key")
+			mu.Lock()
+			bucket := hashStore[hkey]
+			var value json.RawMessage
+			if bucket != nil {
+				value = bucket[field]
+			}
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if len(value) == 0 {
+				_, _ = w.Write([]byte("null"))
+				return
+			}
+			resp := map[string]any{"result": json.RawMessage(value)}
+			_ = json.NewEncoder(w).Encode(resp)
+
+		case "/hgetall":
+			hkey := r.URL.Query().Get("hkey")
+			mu.Lock()
+			bucket := hashStore[hkey]
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			if len(bucket) == 0 {
+				_, _ = w.Write([]byte("null"))
+				return
+			}
+			payload := make(map[string]json.RawMessage, len(bucket))
+			for k, v := range bucket {
+				payload[k] = json.RawMessage(v)
+			}
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			resp := map[string]any{"result": json.RawMessage(encoded)}
 			_ = json.NewEncoder(w).Encode(resp)
 
 		case "/get_status":
@@ -243,11 +337,18 @@ func newSandboxServer() *httptest.Server {
 
 		case "/add_file_base64":
 			var req struct {
-				FileBase64 string `json:"file_base64_str"`
-				Filename   string `json:"filename"`
+				FileBase64  string            `json:"file_base64_str"`
+				Filename    string            `json:"filename"`
+				Secret      string            `json:"secret"`
+				Metadata    map[string]string `json:"metadata"`
+				ContentType string            `json:"content_type"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if strings.TrimSpace(req.FileBase64) == "" {
+				http.Error(w, "file_base64_str is required", http.StatusBadRequest)
 				return
 			}
 			data, err := base64.StdEncoding.DecodeString(req.FileBase64)
@@ -255,9 +356,26 @@ func newSandboxServer() *httptest.Server {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			cid := "CID-" + req.Filename
+			filename := strings.TrimSpace(req.Filename)
+			if filename == "" {
+				filename = fmt.Sprintf("file-%d.bin", len(files)+1)
+			}
+			cid := newCID()
+			rec := fileRecord{
+				Data:        data,
+				Filename:    filename,
+				Secret:      strings.TrimSpace(req.Secret),
+				Metadata:    nil,
+				ContentType: strings.TrimSpace(req.ContentType),
+			}
+			if len(req.Metadata) > 0 {
+				rec.Metadata = make(map[string]string, len(req.Metadata))
+				for k, v := range req.Metadata {
+					rec.Metadata[k] = v
+				}
+			}
 			mu.Lock()
-			files[cid] = fileRecord{Data: data, Filename: req.Filename}
+			files[cid] = rec
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -266,7 +384,8 @@ func newSandboxServer() *httptest.Server {
 
 		case "/get_file_base64":
 			var req struct {
-				CID string `json:"cid"`
+				CID    string `json:"cid"`
+				Secret string `json:"secret"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -275,7 +394,7 @@ func newSandboxServer() *httptest.Server {
 			mu.Lock()
 			rec, ok := files[req.CID]
 			mu.Unlock()
-			if !ok {
+			if !ok || (rec.Secret != "" && rec.Secret != strings.TrimSpace(req.Secret)) {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
@@ -285,13 +404,139 @@ func newSandboxServer() *httptest.Server {
 				"filename":        rec.Filename,
 			})
 
+		case "/add_file":
+			if err := r.ParseMultipartForm(32 << 20); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+			data, err := io.ReadAll(file)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			metaRaw := strings.TrimSpace(r.FormValue("body_json"))
+			rec := fileRecord{Data: data, Filename: header.Filename}
+			if metaRaw != "" {
+				var meta map[string]any
+				if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
+					http.Error(w, fmt.Sprintf("invalid body_json: %v", err), http.StatusBadRequest)
+					return
+				}
+				if secret, ok := meta["secret"].(string); ok {
+					rec.Secret = secret
+				}
+				if metadata, ok := meta["metadata"].(map[string]any); ok {
+					rec.Metadata = map[string]string{}
+					for k, v := range metadata {
+						if str, ok := v.(string); ok {
+							rec.Metadata[k] = str
+						}
+					}
+				}
+				if ct, ok := meta["content_type"].(string); ok {
+					rec.ContentType = ct
+				}
+			}
+			if strings.TrimSpace(rec.ContentType) == "" {
+				rec.ContentType = http.DetectContentType(data)
+			}
+			cid := newCID()
+			mu.Lock()
+			files[cid] = rec
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{"cid": cid},
+			})
+
+		case "/get_file":
+			cid := r.URL.Query().Get("cid")
+			secret := strings.TrimSpace(r.URL.Query().Get("secret"))
+			mu.Lock()
+			rec, ok := files[cid]
+			mu.Unlock()
+			if !ok || (rec.Secret != "" && rec.Secret != secret) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			meta := map[string]any{}
+			if rec.Filename != "" {
+				meta["filename"] = rec.Filename
+			}
+			if len(rec.Metadata) > 0 {
+				inner := make(map[string]string, len(rec.Metadata))
+				for k, v := range rec.Metadata {
+					inner[k] = v
+				}
+				meta["metadata"] = inner
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{
+					"file_path": cid,
+					"meta":      meta,
+				},
+			})
+
+		case "/add_yaml":
+			var req struct {
+				Data     json.RawMessage `json:"data"`
+				Filename string          `json:"fn"`
+				Secret   string          `json:"secret"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(bytes.TrimSpace(req.Data)) == 0 {
+				http.Error(w, "data is required", http.StatusBadRequest)
+				return
+			}
+			cid := newCID()
+			rec := yamlRecord{Data: append([]byte(nil), bytes.TrimSpace(req.Data)...), Secret: strings.TrimSpace(req.Secret)}
+			mu.Lock()
+			yamlDocs[cid] = rec
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{"cid": cid},
+			})
+
+		case "/get_yaml":
+			cid := r.URL.Query().Get("cid")
+			secret := strings.TrimSpace(r.URL.Query().Get("secret"))
+			mu.Lock()
+			rec, ok := yamlDocs[cid]
+			mu.Unlock()
+			if !ok || (rec.Secret != "" && rec.Secret != secret) {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if len(rec.Data) == 0 {
+				_, _ = w.Write([]byte("null"))
+				return
+			}
+			var payload any
+			if err := json.Unmarshal(rec.Data, &payload); err != nil {
+				http.Error(w, fmt.Sprintf("decode yaml data: %v", err), http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": payload})
+
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 }
 
-func mapsKeys(m map[string]any) []string {
+func mapsKeys(m map[string]json.RawMessage) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
