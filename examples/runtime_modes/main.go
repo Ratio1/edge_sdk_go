@@ -52,9 +52,10 @@ func demoHTTP() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.Put(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
+	if _, err := cs.Set(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
 		return err
 	}
+
 	var itemValue map[string]any
 	if _, err := cs.Get(ctx, "jobs:1", &itemValue); err != nil {
 		return err
@@ -124,19 +125,21 @@ func demoMock() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.Put(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
+	if _, err := cs.Set(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
 		return err
 	}
-	list, err := cs.List(ctx, "", "", 0)
+	status, err := cs.GetStatus(ctx)
 	if err != nil {
 		return err
 	}
-	for _, item := range list.Items {
-		var value map[string]string
-		if err := json.Unmarshal(item.Value, &value); err != nil {
-			return fmt.Errorf("decode list item %s: %w", item.Key, err)
+	if status != nil {
+		for _, key := range status.Keys {
+			var value map[string]string
+			if _, err := cs.Get(ctx, key, &value); err != nil {
+				return fmt.Errorf("decode item %s: %w", key, err)
+			}
+			fmt.Printf("mock cstore item %s -> %v\n", key, value)
 		}
-		fmt.Printf("mock cstore item %s -> %v\n", item.Key, value)
 	}
 
 	content := []byte("mock payload")
@@ -194,7 +197,7 @@ func newSandboxServer() *httptest.Server {
 
 	var (
 		mu      sync.Mutex
-		kvStore = map[string]string{}
+		kvStore = map[string]any{}
 		files   = map[string]fileRecord{}
 	)
 
@@ -203,7 +206,7 @@ func newSandboxServer() *httptest.Server {
 		case "/set":
 			var req struct {
 				Key   string `json:"key"`
-				Value string `json:"value"`
+				Value any    `json:"value"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -288,7 +291,7 @@ func newSandboxServer() *httptest.Server {
 	}))
 }
 
-func mapsKeys(m map[string]string) []string {
+func mapsKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

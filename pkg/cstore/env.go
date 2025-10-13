@@ -71,12 +71,12 @@ type mockBackend struct {
 	store *mockStore
 }
 
-func (b *mockBackend) GetRaw(ctx context.Context, key string) ([]byte, error) {
-	return b.store.getRaw(ctx, key)
+func (b *mockBackend) Get(ctx context.Context, key string) ([]byte, error) {
+	return b.store.get(ctx, key)
 }
 
-func (b *mockBackend) PutRaw(ctx context.Context, key string, raw []byte, opts *PutOptions) (*Item[json.RawMessage], error) {
-	ent, err := b.store.putRaw(ctx, key, raw, opts)
+func (b *mockBackend) Set(ctx context.Context, key string, raw []byte, opts *SetOptions) (*Item[json.RawMessage], error) {
+	ent, err := b.store.set(ctx, key, raw, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -93,16 +93,12 @@ func (b *mockBackend) PutRaw(ctx context.Context, key string, raw []byte, opts *
 	}, nil
 }
 
-func (b *mockBackend) ListKeys(ctx context.Context) ([]string, error) {
-	return b.store.listKeys(ctx)
+func (b *mockBackend) HGet(ctx context.Context, hashKey, field string) ([]byte, error) {
+	return b.store.hGet(ctx, hashKey, field)
 }
 
-func (b *mockBackend) HGetRaw(ctx context.Context, hashKey, field string) ([]byte, error) {
-	return b.store.hGetRaw(ctx, hashKey, field)
-}
-
-func (b *mockBackend) HSetRaw(ctx context.Context, hashKey, field string, raw []byte, opts *PutOptions) (*HashItem[json.RawMessage], error) {
-	ent, err := b.store.hSetRaw(ctx, hashKey, field, raw, opts)
+func (b *mockBackend) HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) (*HashItem[json.RawMessage], error) {
+	ent, err := b.store.hSet(ctx, hashKey, field, raw, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -114,8 +110,8 @@ func (b *mockBackend) HSetRaw(ctx context.Context, hashKey, field string, raw []
 	}, nil
 }
 
-func (b *mockBackend) HGetAllRaw(ctx context.Context, hashKey string) ([]byte, error) {
-	fields, err := b.store.hGetAllRaw(ctx, hashKey)
+func (b *mockBackend) HGetAll(ctx context.Context, hashKey string) ([]byte, error) {
+	fields, err := b.store.hGetAll(ctx, hashKey)
 	if err != nil {
 		return nil, err
 	}
@@ -127,4 +123,15 @@ func (b *mockBackend) HGetAllRaw(ctx context.Context, hashKey string) ([]byte, e
 		return nil, err
 	}
 	return data, nil
+}
+
+func (b *mockBackend) GetStatus(ctx context.Context) ([]byte, error) {
+	status, err := b.store.status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if status == nil {
+		return nil, nil
+	}
+	return json.Marshal(status)
 }

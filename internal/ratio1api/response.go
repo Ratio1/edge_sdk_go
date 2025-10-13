@@ -3,6 +3,7 @@ package ratio1api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strconv"
 )
 
@@ -15,6 +16,7 @@ func ExtractResult(body []byte) ([]byte, error) {
 	if len(trimmed) == 0 {
 		return nil, nil
 	}
+	fmt.Print("body", string(body))
 
 	var envelope struct {
 		Result json.RawMessage `json:"result"`
@@ -55,5 +57,6 @@ func DecodeResult(body []byte, out any) error {
 	if len(payload) == 0 {
 		payload = []byte("null")
 	}
+	fmt.Print(string(payload))
 	return json.Unmarshal(payload, out)
 }

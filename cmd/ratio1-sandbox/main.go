@@ -161,14 +161,14 @@ func withMiddleware(delay time.Duration, failCfg failConfig, next http.HandlerFu
 
 func handleCStoreStatus(w http.ResponseWriter, r *http.Request, store *cstoremock.Mock) {
 	ctx := r.Context()
-	list, err := cstoremock.List[json.RawMessage](ctx, store, "", "", 0)
+	status, err := cstoremock.GetStatus(ctx, store)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	keys := make([]string, 0, len(list.Items))
-	for _, item := range list.Items {
-		keys = append(keys, item.Key)
+	var keys []string
+	if status != nil {
+		keys = append([]string(nil), status.Keys...)
 	}
 	writeResult(w, map[string]any{"keys": keys})
 }
@@ -198,7 +198,7 @@ func handleCStoreSet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 	if value == nil {
 		value = json.RawMessage("null")
 	}
-	if _, err := cstoremock.Put(r.Context(), store, payload.Key, value, nil); err != nil {
+	if _, err := cstoremock.Set(r.Context(), store, payload.Key, value, nil); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
