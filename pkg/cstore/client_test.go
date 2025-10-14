@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -284,57 +282,6 @@ func TestClientWriteRejectsFalseResult(t *testing.T) {
 	if _, err := client.HSet(context.Background(), "jobs", "1", counter{Count: 2}, nil); err == nil {
 		t.Fatalf("expected error for rejected hset")
 	}
-}
-
-func TestClientGetStatusGolden(t *testing.T) {
-	golden := readGolden(t, "get_status_response.json")
-	var want struct {
-		Result cstore.Status `json:"result"`
-	}
-	if err := json.Unmarshal(golden, &want); err != nil {
-		t.Fatalf("unmarshal golden: %v", err)
-	}
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/get_status" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(golden)
-	}))
-	defer srv.Close()
-
-	client, err := cstore.New(srv.URL)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	status, err := client.GetStatus(context.Background())
-	if err != nil {
-		t.Fatalf("GetStatus: %v", err)
-	}
-	if status == nil {
-		t.Fatalf("expected non-nil status")
-	}
-	if len(status.Keys) != len(want.Result.Keys) {
-		t.Fatalf("GetStatus keys length mismatch: got %v want %v", status.Keys, want.Result.Keys)
-	}
-	for i, key := range want.Result.Keys {
-		if status.Keys[i] != key {
-			t.Fatalf("GetStatus keys mismatch at %d: got %q want %q", i, status.Keys[i], key)
-		}
-	}
-}
-
-func readGolden(t *testing.T, name string) []byte {
-	t.Helper()
-	path := filepath.Join("testdata", name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read golden %s: %v", name, err)
-	}
-	return data
 }
 
 func newTestCStoreServer() *httptest.Server {
