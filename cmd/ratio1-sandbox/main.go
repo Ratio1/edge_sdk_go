@@ -239,7 +239,7 @@ func handleCStoreSet(w http.ResponseWriter, r *http.Request, store *cstoremock.M
 		writeError(w, http.StatusBadRequest, "key is required", nil)
 		return
 	}
-	if _, err := cstoremock.Set(r.Context(), store, payload.Key, payload.Value, nil); err != nil {
+	if err := cstoremock.Set(r.Context(), store, payload.Key, payload.Value, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore set failed", err)
 		return
 	}
@@ -287,7 +287,7 @@ func handleCStoreHSet(w http.ResponseWriter, r *http.Request, store *cstoremock.
 		return
 	}
 
-	if _, err := cstoremock.HSet(r.Context(), store, payload.HashKey, payload.Field, payload.Value, nil); err != nil {
+	if err := cstoremock.HSet(r.Context(), store, payload.HashKey, payload.Field, payload.Value, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "cstore hset failed", err)
 		return
 	}
@@ -374,12 +374,12 @@ func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 	if strings.TrimSpace(payload.Secret) != "" {
 		opts.Secret = payload.Secret
 	}
-	stat, err := fs.AddFileBase64(r.Context(), filename, bytes.NewReader(data), int64(len(data)), opts)
+	cid, err := fs.AddFileBase64(r.Context(), filename, bytes.NewReader(data), int64(len(data)), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "r1fs add_file_base64 failed", err)
 		return
 	}
-	writeResult(w, map[string]any{"cid": stat.Path})
+	writeResult(w, map[string]any{"cid": cid})
 }
 
 func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
@@ -462,12 +462,12 @@ func handleR1FSAddFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock
 	if strings.TrimSpace(opts.ContentType) == "" {
 		opts.ContentType = http.DetectContentType(data)
 	}
-	stat, err := fs.AddFile(r.Context(), header.Filename, data, int64(len(data)), opts)
+	cid, err := fs.AddFile(r.Context(), header.Filename, data, int64(len(data)), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "r1fs add_file failed", err)
 		return
 	}
-	writeResult(w, map[string]any{"cid": stat.Path})
+	writeResult(w, map[string]any{"cid": cid})
 }
 
 func handleR1FSGetFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {

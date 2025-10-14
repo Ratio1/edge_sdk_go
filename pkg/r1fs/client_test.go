@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -24,7 +24,7 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 		nextID    = 0
 	)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/add_file_base64":
 			defer r.Body.Close()
@@ -181,7 +181,8 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
+	})
+	srv := newLocalHTTPServer(t, handler)
 	defer srv.Close()
 
 	client, err := r1fs.New(srv.URL)
@@ -191,15 +192,15 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 
 	ctx := context.Background()
 	payload := strings.NewReader("hello world")
-	stat, err := client.AddFileBase64(ctx, "/tmp/hello.txt", payload, int64(payload.Len()), &r1fs.UploadOptions{ContentType: "text/plain"})
+	cid, err := client.AddFileBase64(ctx, "/tmp/hello.txt", payload, int64(payload.Len()), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
 		t.Fatalf("AddFileBase64: %v", err)
 	}
-	if stat == nil || stat.Path == "" {
-		t.Fatalf("AddFileBase64 returned invalid stat: %#v", stat)
+	if cid == "" {
+		t.Fatalf("AddFileBase64 returned empty cid")
 	}
 
-	content, filename, err := client.GetFileBase64(ctx, stat.Path, "")
+	content, filename, err := client.GetFileBase64(ctx, cid, "")
 	if err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
 	}
@@ -211,14 +212,14 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 	}
 
 	streamPayload := strings.NewReader("stream upload")
-	streamStat, err := client.AddFile(ctx, "stream.txt", streamPayload, int64(streamPayload.Len()), &r1fs.UploadOptions{Secret: "s3"})
+	streamCID, err := client.AddFile(ctx, "stream.txt", streamPayload, int64(streamPayload.Len()), &r1fs.UploadOptions{Secret: "s3"})
 	if err != nil {
 		t.Fatalf("AddFile: %v", err)
 	}
-	if streamStat == nil || streamStat.Path == "" {
-		t.Fatalf("AddFile returned invalid stat: %#v", streamStat)
+	if streamCID == "" {
+		t.Fatalf("AddFile returned empty cid")
 	}
-	loc, err := client.GetFile(ctx, streamStat.Path, "s3")
+	loc, err := client.GetFile(ctx, streamCID, "s3")
 	if err != nil {
 		t.Fatalf("GetFile: %v", err)
 	}
@@ -245,4 +246,35 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 	if _, err := client.GetYAML(ctx, "missing-yaml", "", nil); err == nil {
 		t.Fatalf("expected error for missing YAML document")
 	}
+}
+
+type testServer struct {
+	URL      string
+	listener net.Listener
+	server   *http.Server
+}
+
+func (s *testServer) Close() {
+	_ = s.server.Shutdown(context.Background())
+	_ = s.listener.Close()
+}
+
+func newLocalHTTPServer(t *testing.T, handler http.Handler) *testServer {
+	t.Helper()
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("network disabled for tests: %v", err)
+	}
+	srv := &http.Server{Handler: handler}
+	ts := &testServer{
+		URL:      "http://" + ln.Addr().String(),
+		listener: ln,
+		server:   srv,
+	}
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			t.Logf("test server serve error: %v", err)
+		}
+	}()
+	return ts
 }

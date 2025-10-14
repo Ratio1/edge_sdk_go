@@ -55,7 +55,7 @@ func (c *Client) Get(ctx context.Context, key string, out any) (*Item[json.RawMe
 }
 
 // Set stores a value encoded as JSON.
-func (c *Client) Set(ctx context.Context, key string, value any, opts *SetOptions) (*Item[json.RawMessage], error) {
+func (c *Client) Set(ctx context.Context, key string, value any, opts *SetOptions) error {
 	return setJSONEncoded(ctx, c, key, value, opts)
 }
 
@@ -74,7 +74,7 @@ func (c *Client) HGet(ctx context.Context, hashKey, field string, out any) (*Has
 }
 
 // HSet stores a field value within a hash key.
-func (c *Client) HSet(ctx context.Context, hashKey, field string, value any, opts *SetOptions) (*HashItem[json.RawMessage], error) {
+func (c *Client) HSet(ctx context.Context, hashKey, field string, value any, opts *SetOptions) error {
 	return setHashJSONEncoded(ctx, c, hashKey, field, value, opts)
 }
 
@@ -113,42 +113,26 @@ func getItem[T any](ctx context.Context, client *Client, key string) (*Item[T], 
 	return decodeItem[T](key, data)
 }
 
-func setJSONEncoded(ctx context.Context, client *Client, key string, value any, opts *SetOptions) (*Item[json.RawMessage], error) {
+func setJSONEncoded(ctx context.Context, client *Client, key string, value any, opts *SetOptions) error {
 	payloadBytes, err := marshalJSON(value)
 	if err != nil {
-		return nil, fmt.Errorf("cstore: encode value: %w", err)
+		return fmt.Errorf("cstore: encode value: %w", err)
 	}
 	return setRawJSON(ctx, client, key, payloadBytes, opts)
 }
 
-func setRawJSON(ctx context.Context, client *Client, key string, payload []byte, opts *SetOptions) (*Item[json.RawMessage], error) {
+func setRawJSON(ctx context.Context, client *Client, key string, payload []byte, opts *SetOptions) error {
 	if strings.TrimSpace(key) == "" {
-		return nil, fmt.Errorf("cstore: key is required")
-	}
-	if err := validateSetOptions(opts); err != nil {
-		return nil, err
+		return fmt.Errorf("cstore: key is required")
 	}
 
 	if client == nil || client.backend == nil {
-		return nil, fmt.Errorf("cstore: client is nil")
+		return fmt.Errorf("cstore: client is nil")
 	}
 
 	raw := append([]byte(nil), bytes.TrimSpace(payload)...)
 
-	meta, err := client.backend.Set(ctx, key, raw, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	item := &Item[json.RawMessage]{
-		Key:   key,
-		Value: json.RawMessage(raw),
-	}
-	if meta != nil {
-		item.ETag = meta.ETag
-		item.ExpiresAt = meta.ExpiresAt
-	}
-	return item, nil
+	return client.backend.Set(ctx, key, raw, opts)
 }
 
 func getHashItem[T any](ctx context.Context, client *Client, hashKey, field string) (*HashItem[T], error) {
@@ -182,46 +166,29 @@ func getAllHashItems[T any](ctx context.Context, client *Client, hashKey string)
 	return decodeHashItems[T](hashKey, data)
 }
 
-func setHashJSONEncoded(ctx context.Context, client *Client, hashKey, field string, value any, opts *SetOptions) (*HashItem[json.RawMessage], error) {
+func setHashJSONEncoded(ctx context.Context, client *Client, hashKey, field string, value any, opts *SetOptions) error {
 	payloadBytes, err := marshalJSON(value)
 	if err != nil {
-		return nil, fmt.Errorf("cstore: encode hash value: %w", err)
+		return fmt.Errorf("cstore: encode hash value: %w", err)
 	}
 	return setHashRawJSON(ctx, client, hashKey, field, payloadBytes, opts)
 }
 
-func setHashRawJSON(ctx context.Context, client *Client, hashKey, field string, payload []byte, opts *SetOptions) (*HashItem[json.RawMessage], error) {
+func setHashRawJSON(ctx context.Context, client *Client, hashKey, field string, payload []byte, opts *SetOptions) error {
 	if strings.TrimSpace(hashKey) == "" {
-		return nil, fmt.Errorf("cstore: hash key is required")
+		return fmt.Errorf("cstore: hash key is required")
 	}
 	if strings.TrimSpace(field) == "" {
-		return nil, fmt.Errorf("cstore: hash field is required")
-	}
-	if err := validateSetOptions(opts); err != nil {
-		return nil, err
+		return fmt.Errorf("cstore: hash field is required")
 	}
 
 	if client == nil || client.backend == nil {
-		return nil, fmt.Errorf("cstore: client is nil")
+		return fmt.Errorf("cstore: client is nil")
 	}
 
 	raw := append([]byte(nil), bytes.TrimSpace(payload)...)
 
-	meta, err := client.backend.HSet(ctx, hashKey, field, raw, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	item := &HashItem[json.RawMessage]{
-		HashKey: hashKey,
-		Field:   field,
-		Value:   json.RawMessage(raw),
-	}
-	if meta != nil {
-		item.ETag = meta.ETag
-		item.ExpiresAt = meta.ExpiresAt
-	}
-	return item, nil
+	return client.backend.HSet(ctx, hashKey, field, raw, opts)
 }
 
 func decodeItem[T any](key string, data []byte) (*Item[T], error) {
@@ -281,21 +248,6 @@ func decodeHashItems[T any](hashKey string, data []byte) ([]HashItem[T], error) 
 	return items, nil
 }
 
-func validateSetOptions(opts *SetOptions) error {
-	if opts == nil {
-		return nil
-	}
-	if opts.TTLSeconds != nil {
-		// TODO: support once upstream exposes TTL semantics.
-		return fmt.Errorf("%w: TTLSeconds not yet supported", ErrUnsupportedFeature)
-	}
-	if opts.IfETagMatch != "" || opts.IfAbsent {
-		// TODO: map optimistic concurrency to upstream headers when available.
-		return fmt.Errorf("%w: conditional writes not yet supported", ErrUnsupportedFeature)
-	}
-	return nil
-}
-
 func marshalJSON(value any) ([]byte, error) {
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
@@ -344,9 +296,9 @@ func decodeBoolResult(body []byte) (bool, error) {
 
 type Backend interface {
 	Get(ctx context.Context, key string) ([]byte, error)
-	Set(ctx context.Context, key string, raw []byte, opts *SetOptions) (*Item[json.RawMessage], error)
+	Set(ctx context.Context, key string, raw []byte, opts *SetOptions) error
 	HGet(ctx context.Context, hashKey, field string) ([]byte, error)
-	HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) (*HashItem[json.RawMessage], error)
+	HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) error
 	HGetAll(ctx context.Context, hashKey string) ([]byte, error)
 	GetStatus(ctx context.Context) ([]byte, error)
 }
@@ -381,9 +333,9 @@ func (b *httpBackend) Get(ctx context.Context, key string) ([]byte, error) {
 	return payload, nil
 }
 
-func (b *httpBackend) Set(ctx context.Context, key string, raw []byte, opts *SetOptions) (*Item[json.RawMessage], error) {
+func (b *httpBackend) Set(ctx context.Context, key string, raw []byte, opts *SetOptions) error {
 	if b == nil || b.client == nil {
-		return nil, fmt.Errorf("cstore: http backend not configured")
+		return fmt.Errorf("cstore: http backend not configured")
 	}
 	type setRequest struct {
 		Key             string          `json:"key"`
@@ -397,7 +349,7 @@ func (b *httpBackend) Set(ctx context.Context, key string, raw []byte, opts *Set
 	}
 	body, err := marshalJSON(reqPayload)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req := &httpx.Request{
 		Method: http.MethodPost,
@@ -410,21 +362,21 @@ func (b *httpBackend) Set(ctx context.Context, key string, raw []byte, opts *Set
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	ok, err := decodeBoolResult(payloadBytes)
 	if err != nil {
-		return nil, fmt.Errorf("cstore: decode set response: %w", err)
+		return fmt.Errorf("cstore: decode set response: %w", err)
 	}
 	if !ok {
-		return nil, fmt.Errorf("cstore: set rejected by upstream")
+		return fmt.Errorf("cstore: set rejected by upstream")
 	}
-	return nil, nil
+	return nil
 }
 
 func (b *httpBackend) GetStatus(ctx context.Context) ([]byte, error) {
@@ -478,9 +430,9 @@ func (b *httpBackend) HGet(ctx context.Context, hashKey, field string) ([]byte, 
 	return payload, nil
 }
 
-func (b *httpBackend) HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) (*HashItem[json.RawMessage], error) {
+func (b *httpBackend) HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) error {
 	if b == nil || b.client == nil {
-		return nil, fmt.Errorf("cstore: http backend not configured")
+		return fmt.Errorf("cstore: http backend not configured")
 	}
 	type hashSetRequest struct {
 		HashKey         string          `json:"hkey"`
@@ -496,7 +448,7 @@ func (b *httpBackend) HSet(ctx context.Context, hashKey, field string, raw []byt
 	}
 	body, err := marshalJSON(reqPayload)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req := &httpx.Request{
 		Method: http.MethodPost,
@@ -509,20 +461,20 @@ func (b *httpBackend) HSet(ctx context.Context, hashKey, field string, raw []byt
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	ok, err := decodeBoolResult(payloadBytes)
 	if err != nil {
-		return nil, fmt.Errorf("cstore: decode hset response: %w", err)
+		return fmt.Errorf("cstore: decode hset response: %w", err)
 	}
 	if !ok {
-		return nil, fmt.Errorf("cstore: hset rejected by upstream")
+		return fmt.Errorf("cstore: hset rejected by upstream")
 	}
-	return nil, nil
+	return nil
 }
 
 func (b *httpBackend) HGetAll(ctx context.Context, hashKey string) ([]byte, error) {

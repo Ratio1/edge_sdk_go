@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/devseed"
 	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
@@ -14,20 +13,19 @@ import (
 )
 
 func TestMockAddFileBase64AndGetFileBase64(t *testing.T) {
-	now := time.Now().UTC()
-	m := mock.New(mock.WithClock(func() time.Time { return now }))
+	m := mock.New()
 	ctx := context.Background()
 
 	data := []byte("mock-file")
-	stat, err := m.AddFileBase64(ctx, "files/a.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	cid, err := m.AddFileBase64(ctx, "files/a.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
 		t.Fatalf("AddFileBase64: %v", err)
 	}
-	if stat.Path == "" || stat.ContentType != "text/plain" || stat.Size != int64(len(data)) {
-		t.Fatalf("unexpected add_file_base64 stat: %#v", stat)
+	if cid == "" {
+		t.Fatalf("AddFileBase64 returned empty cid")
 	}
 
-	payload, filename, err := m.GetFileBase64(ctx, stat.Path, "")
+	payload, filename, err := m.GetFileBase64(ctx, cid, "")
 	if err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
 	}
@@ -38,11 +36,7 @@ func TestMockAddFileBase64AndGetFileBase64(t *testing.T) {
 		t.Fatalf("get mismatch: %q", payload)
 	}
 
-	if stat.ETag == "" || stat.LastModified == nil {
-		t.Fatalf("expected ETag and LastModified: %#v", stat)
-	}
-
-	loc, err := m.GetFile(ctx, stat.Path, "")
+	loc, err := m.GetFile(ctx, cid, "")
 	if err != nil {
 		t.Fatalf("GetFile: %v", err)
 	}
@@ -81,15 +75,15 @@ func TestMockAddFileAndYAML(t *testing.T) {
 	ctx := context.Background()
 
 	fileData := []byte("stream data")
-	stat, err := m.AddFile(ctx, "stream.txt", fileData, int64(len(fileData)), nil)
+	cid, err := m.AddFile(ctx, "stream.txt", fileData, int64(len(fileData)), nil)
 	if err != nil {
 		t.Fatalf("AddFile: %v", err)
 	}
-	if stat.Path == "" {
+	if cid == "" {
 		t.Fatalf("AddFile returned empty path")
 	}
 
-	loc, err := m.GetFile(ctx, stat.Path, "")
+	loc, err := m.GetFile(ctx, cid, "")
 	if err != nil {
 		t.Fatalf("GetFile: %v", err)
 	}

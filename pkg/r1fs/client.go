@@ -40,33 +40,32 @@ func NewWithBackend(b Backend) *Client {
 	return &Client{backend: b}
 }
 
-// AddFileBase64 writes data via /add_file_base64. The returned FileStat uses the CID
-// reported by the upstream API as its Path field.
-func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (*FileStat, error) {
+// AddFileBase64 writes data via /add_file_base64 and returns the upstream CID.
+func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (string, error) {
 	if strings.TrimSpace(filename) == "" {
-		return nil, fmt.Errorf("r1fs: filename is required")
+		return "", fmt.Errorf("r1fs: filename is required")
 	}
 	if c == nil || c.backend == nil {
-		return nil, fmt.Errorf("r1fs: client is nil")
+		return "", fmt.Errorf("r1fs: client is nil")
 	}
 	payload, err := io.ReadAll(data)
 	if err != nil {
-		return nil, fmt.Errorf("r1fs: read upload payload: %w", err)
+		return "", fmt.Errorf("r1fs: read upload payload: %w", err)
 	}
 	return c.backend.AddFileBase64(ctx, filename, payload, size, opts)
 }
 
-// AddFile uploads data using the /add_file endpoint (multipart form upload).
-func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (*FileStat, error) {
+// AddFile uploads data using the /add_file endpoint (multipart form upload) and returns the upstream CID.
+func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (string, error) {
 	if strings.TrimSpace(filename) == "" {
-		return nil, fmt.Errorf("r1fs: filename is required")
+		return "", fmt.Errorf("r1fs: filename is required")
 	}
 	if c == nil || c.backend == nil {
-		return nil, fmt.Errorf("r1fs: client is nil")
+		return "", fmt.Errorf("r1fs: client is nil")
 	}
 	payload, err := io.ReadAll(data)
 	if err != nil {
-		return nil, fmt.Errorf("r1fs: read upload payload: %w", err)
+		return "", fmt.Errorf("r1fs: read upload payload: %w", err)
 	}
 	return c.backend.AddFile(ctx, filename, payload, size, opts)
 }
@@ -141,13 +140,6 @@ func (c *Client) getYAMLRaw(ctx context.Context, cid string, secret string) ([]b
 	return c.backend.GetYAML(ctx, cid, secret)
 }
 
-func chooseSize(provided int64, actual int64) int64 {
-	if provided >= 0 {
-		return provided
-	}
-	return actual
-}
-
 func cloneMeta(src map[string]any) map[string]any {
 	if len(src) == 0 {
 		return nil
@@ -167,20 +159,6 @@ func encodeJSON(payload any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
-}
-
-func copyMap(opts *UploadOptions) map[string]string {
-	if opts == nil || len(opts.Metadata) == 0 {
-		return nil
-	}
-	dst := make(map[string]string, len(opts.Metadata))
-	for k, v := range opts.Metadata {
-		dst[k] = v
-	}
-	if opts.Secret != "" {
-		dst["r1fs.secret"] = opts.Secret
-	}
-	return dst
 }
 
 func decodeYAMLDocument[T any](cid string, data []byte) (*YAMLDocument[T], error) {
@@ -215,8 +193,8 @@ func decodeYAMLDocument[T any](cid string, data []byte) (*YAMLDocument[T], error
 }
 
 type Backend interface {
-	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
-	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error)
+	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (string, error)
+	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (string, error)
 	GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error)
 	GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error)
 	AddYAML(ctx context.Context, data any, filename string, secret string) (string, error)
@@ -227,9 +205,9 @@ type httpBackend struct {
 	client *httpx.Client
 }
 
-func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
+func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (string, error) {
 	if b == nil || b.client == nil {
-		return nil, fmt.Errorf("r1fs: http backend not configured")
+		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := map[string]any{
 		"file_base64_str": base64.StdEncoding.EncodeToString(data),
@@ -248,7 +226,7 @@ func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data [
 	}
 	jsonBody, err := encodeJSON(body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req := &httpx.Request{
 		Method: http.MethodPost,
@@ -261,45 +239,36 @@ func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data [
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	var response struct {
 		CID string `json:"cid"`
 	}
 	if err := ratio1api.DecodeResult(payloadBytes, &response); err != nil {
-		return nil, fmt.Errorf("r1fs: decode add_file_base64 response: %w", err)
+		return "", fmt.Errorf("r1fs: decode add_file_base64 response: %w", err)
 	}
 	if strings.TrimSpace(response.CID) == "" {
-		return nil, fmt.Errorf("r1fs: missing cid in response")
+		return "", fmt.Errorf("r1fs: missing cid in response")
 	}
-	stat := &FileStat{
-		Path:        response.CID,
-		Size:        chooseSize(size, int64(len(data))),
-		ContentType: "",
-		Metadata:    copyMap(opts),
-	}
-	if opts != nil {
-		stat.ContentType = opts.ContentType
-	}
-	return stat, nil
+	return response.CID, nil
 }
 
-func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
+func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (string, error) {
 	if b == nil || b.client == nil {
-		return nil, fmt.Errorf("r1fs: http backend not configured")
+		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	filePart, err := writer.CreateFormFile("file", filename)
 	if err != nil {
-		return nil, fmt.Errorf("r1fs: create multipart part: %w", err)
+		return "", fmt.Errorf("r1fs: create multipart part: %w", err)
 	}
 	if _, err := filePart.Write(data); err != nil {
-		return nil, fmt.Errorf("r1fs: write multipart payload: %w", err)
+		return "", fmt.Errorf("r1fs: write multipart payload: %w", err)
 	}
 	meta := make(map[string]any)
 	if opts != nil {
@@ -318,13 +287,13 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 	}
 	metaBytes, err := json.Marshal(meta)
 	if err != nil {
-		return nil, fmt.Errorf("r1fs: encode multipart metadata: %w", err)
+		return "", fmt.Errorf("r1fs: encode multipart metadata: %w", err)
 	}
 	if err := writer.WriteField("body_json", string(metaBytes)); err != nil {
-		return nil, fmt.Errorf("r1fs: write multipart metadata: %w", err)
+		return "", fmt.Errorf("r1fs: write multipart metadata: %w", err)
 	}
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("r1fs: finalize multipart body: %w", err)
+		return "", fmt.Errorf("r1fs: finalize multipart body: %w", err)
 	}
 	payload := body.Bytes()
 	req := &httpx.Request{
@@ -338,31 +307,22 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	var response struct {
 		CID string `json:"cid"`
 	}
 	if err := ratio1api.DecodeResult(payloadBytes, &response); err != nil {
-		return nil, fmt.Errorf("r1fs: decode add_file response: %w", err)
+		return "", fmt.Errorf("r1fs: decode add_file response: %w", err)
 	}
 	if strings.TrimSpace(response.CID) == "" {
-		return nil, fmt.Errorf("r1fs: missing cid in add_file response")
+		return "", fmt.Errorf("r1fs: missing cid in add_file response")
 	}
-	stat := &FileStat{
-		Path:        response.CID,
-		Size:        chooseSize(size, int64(len(data))),
-		ContentType: "",
-		Metadata:    copyMap(opts),
-	}
-	if opts != nil {
-		stat.ContentType = opts.ContentType
-	}
-	return stat, nil
+	return response.CID, nil
 }
 
 func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {

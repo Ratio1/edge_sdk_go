@@ -10,62 +10,31 @@ import (
 	"io"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/devseed"
 	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
 )
 
 type fileEntry struct {
-	data        []byte
-	contentType string
-	etag        string
-	metadata    map[string]string
-	modTime     time.Time
+	data     []byte
+	metadata map[string]string
 }
 
 // Mock implements an in-memory filesystem for tests and sandboxing.
 type Mock struct {
 	mu        sync.RWMutex
 	files     map[string]*fileEntry
-	now       func() time.Time
 	fileNames map[string]string
 	yamlDocs  map[string]json.RawMessage
 }
 
-// Option configures the mock filesystem.
-type Option func(*Mock)
-
-// WithClock overrides the time source.
-func WithClock(fn func() time.Time) Option {
-	return func(m *Mock) {
-		if fn != nil {
-			m.now = fn
-		}
-	}
-}
-
 // New constructs an empty filesystem.
-func New(opts ...Option) *Mock {
-	m := &Mock{
+func New() *Mock {
+	return &Mock{
 		files:     make(map[string]*fileEntry),
 		fileNames: make(map[string]string),
 		yamlDocs:  make(map[string]json.RawMessage),
-		now: func() time.Time {
-			return time.Now().UTC()
-		},
 	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
-}
-
-func (m *Mock) clock() time.Time {
-	if m.now == nil {
-		return time.Now().UTC()
-	}
-	return m.now()
 }
 
 // Seed loads files from seed entries.
@@ -82,87 +51,65 @@ func (m *Mock) Seed(entries []devseed.R1FSSeedEntry) error {
 			return fmt.Errorf("mock r1fs: decode base64: %w", err)
 		}
 		path := normalizePath(e.Path)
-		meta := copyMap(e.Metadata)
-		entry := &fileEntry{
-			data:        data,
-			contentType: e.ContentType,
-			etag:        newETag(),
-			metadata:    meta,
-			modTime:     m.clock(),
+		m.files[path] = &fileEntry{
+			data:     append([]byte(nil), data...),
+			metadata: copyMap(e.Metadata),
 		}
-		if e.LastModified != nil {
-			entry.modTime = e.LastModified.UTC()
-		}
-		m.files[path] = entry
-		if m.fileNames != nil {
-			key := strings.TrimPrefix(path, "/")
-			if key == "" {
-				key = "/"
-			}
-			m.fileNames[key] = path
-		}
+		m.fileNames[path] = path
 	}
 	return nil
 }
 
 // AddFileBase64 stores file contents via the base64 upload flow.
-func (m *Mock) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *r1fs.UploadOptions) (*r1fs.FileStat, error) {
+func (m *Mock) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *r1fs.UploadOptions) (string, error) {
 	if strings.TrimSpace(filename) == "" {
-		return nil, fmt.Errorf("mock r1fs: filename is required")
+		return "", fmt.Errorf("mock r1fs: filename is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return "", err
 	}
 
 	payload, err := io.ReadAll(data)
 	if err != nil {
-		return nil, fmt.Errorf("mock r1fs: read payload: %w", err)
+		return "", fmt.Errorf("mock r1fs: read payload: %w", err)
 	}
 
 	return m.AddFile(ctx, filename, payload, size, opts)
 }
 
 // AddFile stores contents using a generated CID, mimicking /add_file behaviour.
-func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *r1fs.UploadOptions) (*r1fs.FileStat, error) {
+func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *r1fs.UploadOptions) (string, error) {
 	if strings.TrimSpace(filename) == "" {
-		return nil, fmt.Errorf("mock r1fs: filename is required")
+		return "", fmt.Errorf("mock r1fs: filename is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return "", err
 	}
+
+	entry := &fileEntry{
+		data:     append([]byte(nil), data...),
+		metadata: optsMetadata(opts),
+	}
+	if entry.metadata == nil {
+		entry.metadata = make(map[string]string)
+	}
+	entry.metadata["r1fs.filename"] = filename
+
+	cid := newETag()
+	norm := normalizePath(cid)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	now := m.clock()
-	meta := copyMap(optsMetadata(opts))
-	if meta == nil {
-		meta = make(map[string]string)
-	}
-	meta["r1fs.filename"] = filename
-
-	entry := &fileEntry{
-		data:        append([]byte(nil), data...),
-		contentType: "",
-		etag:        newETag(),
-		metadata:    meta,
-		modTime:     now,
-	}
-	if opts != nil {
-		entry.contentType = opts.ContentType
-	}
-
-	cid := newETag()
-	path := normalizePath(cid)
-	m.files[path] = entry
+	m.files[norm] = entry
 	if m.fileNames == nil {
 		m.fileNames = make(map[string]string)
 	}
+	if _, exists := m.fileNames[norm]; !exists {
+		m.fileNames[norm] = norm
+	}
 	m.fileNames[cid] = filename
 
-	stat := buildStat(path, entry, chooseSize(size, int64(len(data))))
-	stat.Path = cid
-	return stat, nil
+	return cid, nil
 }
 
 // GetFileBase64 returns stored file contents and filename.
@@ -190,7 +137,7 @@ func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) ([]byte,
 }
 
 // GetFile resolves metadata for a stored CID.
-func (m *Mock) GetFile(ctx context.Context, cid string, secret string) (*r1fs.FileLocation, error) {
+func (m *Mock) GetFile(ctx context.Context, cid string, _ string) (*r1fs.FileLocation, error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, fmt.Errorf("mock r1fs: cid is required")
 	}
@@ -237,18 +184,18 @@ func (m *Mock) AddYAML(ctx context.Context, data any, filename string, secret st
 	if strings.TrimSpace(filename) == "" {
 		filename = "document.yaml"
 	}
-	stat, err := m.AddFile(ctx, filename, payload, int64(len(payload)), &r1fs.UploadOptions{Secret: secret})
+	cid, err := m.AddFile(ctx, filename, payload, int64(len(payload)), &r1fs.UploadOptions{Secret: secret})
 	if err != nil {
 		return "", err
 	}
 	m.mu.Lock()
-	m.yamlDocs[stat.Path] = json.RawMessage(append([]byte(nil), payload...))
+	m.yamlDocs[cid] = json.RawMessage(append([]byte(nil), payload...))
 	m.mu.Unlock()
-	return stat.Path, nil
+	return cid, nil
 }
 
 // GetYAML retrieves YAML data previously stored with AddYAML.
-func (m *Mock) GetYAML(ctx context.Context, cid string, secret string) ([]byte, error) {
+func (m *Mock) GetYAML(ctx context.Context, cid string, _ string) ([]byte, error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, fmt.Errorf("mock r1fs: cid is required")
 	}
@@ -266,23 +213,6 @@ func (m *Mock) GetYAML(ctx context.Context, cid string, secret string) ([]byte, 
 		return nil, err
 	}
 	return payload, nil
-}
-
-func buildStat(path string, entry *fileEntry, size int64) *r1fs.FileStat {
-	var modPtr *time.Time
-	if !entry.modTime.IsZero() {
-		mod := entry.modTime
-		modPtr = &mod
-	}
-	metadata := copyMap(entry.metadata)
-	return &r1fs.FileStat{
-		Path:         path,
-		Size:         size,
-		ContentType:  entry.contentType,
-		ETag:         entry.etag,
-		LastModified: modPtr,
-		Metadata:     metadata,
-	}
 }
 
 func normalizePath(path string) string {
@@ -318,13 +248,6 @@ func optsMetadata(opts *r1fs.UploadOptions) map[string]string {
 		meta["r1fs.secret"] = opts.Secret
 	}
 	return meta
-}
-
-func chooseSize(provided int64, actual int64) int64 {
-	if provided >= 0 {
-		return provided
-	}
-	return actual
 }
 
 func newETag() string {

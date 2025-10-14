@@ -54,7 +54,7 @@ func demoHTTP() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.Set(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
+	if err := cs.Set(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
 		return err
 	}
 
@@ -65,11 +65,11 @@ func demoHTTP() error {
 	fmt.Println("cstore get:", itemValue)
 
 	data := []byte("hello http")
-	stat, err := fs.AddFileBase64(ctx, "/docs/http.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	cid, err := fs.AddFileBase64(ctx, "/docs/http.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("r1fs add_file_base64: cid=%s size=%d\n", stat.Path, stat.Size)
+	fmt.Printf("r1fs add_file_base64: cid=%s size=%d\n", cid, len(data))
 
 	return nil
 }
@@ -92,7 +92,7 @@ func demoAuto() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.HSet(ctx, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
+	if err := cs.HSet(ctx, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
 		return err
 	}
 	var hItemValue map[string]int
@@ -127,7 +127,7 @@ func demoMock() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.Set(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
+	if err := cs.Set(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
 		return err
 	}
 	status, err := cs.GetStatus(ctx)
@@ -145,11 +145,11 @@ func demoMock() error {
 	}
 
 	content := []byte("mock payload")
-	stat, err := fs.AddFile(ctx, "mock.bin", bytes.NewReader(content), int64(len(content)), nil)
+	cid, err := fs.AddFile(ctx, "mock.bin", bytes.NewReader(content), int64(len(content)), nil)
 	if err != nil {
 		return err
 	}
-	loc, err := fs.GetFile(ctx, stat.Path, "")
+	loc, err := fs.GetFile(ctx, cid, "")
 	if err != nil {
 		return err
 	}

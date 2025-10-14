@@ -1,19 +1,6 @@
 package r1fs
 
-import (
-	"errors"
-	"time"
-)
-
-// FileStat describes a stored file.
-type FileStat struct {
-	Path         string
-	Size         int64
-	ContentType  string
-	ETag         string
-	LastModified *time.Time
-	Metadata     map[string]string
-}
+import "errors"
 
 // UploadOptions control how data is written.
 type UploadOptions struct {

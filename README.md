@@ -10,7 +10,7 @@ The library mirrors the FastAPI plugins shipped in the Ratio1 edge node:
 - [`cstore_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py)
 - [`r1fs_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py)
 
-When the official APIs lack features (TTL headers, directory listings, deletes), the SDK documents the gap with TODO markers and either omits the surface or returns `ErrUnsupportedFeature` where appropriate.
+When the official APIs lack features (TTL headers, directory listings, deletes), the SDK documents the gap with TODO markers and limits its surface to what the upstream currently exposes.
 
 ## Install
 
@@ -120,9 +120,9 @@ func main() {
 
 	// Key/value primitives
 	counter := Counter{Count: 1}
-	if _, err := cs.Set(ctx, "jobs:123", counter, nil); err != nil {
-		log.Fatalf("cstore set: %v", err)
-	}
+    if err := cs.Set(ctx, "jobs:123", counter, nil); err != nil {
+        log.Fatalf("cstore set: %v", err)
+    }
 	var stored Counter
 	if _, err := cs.Get(ctx, "jobs:123", &stored); err != nil {
 		log.Fatalf("cstore get: %v", err)
@@ -137,9 +137,9 @@ func main() {
 		fmt.Println("stored keys:", status.Keys)
 	}
 
-	if _, err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
-		log.Fatalf("cstore hset: %v", err)
-	}
+    if err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
+        log.Fatalf("cstore hset: %v", err)
+    }
 	hItems, err := cs.HGetAll(ctx, "jobs")
 	if err != nil {
 		log.Fatalf("cstore hgetall: %v", err)
@@ -154,17 +154,17 @@ func main() {
 
 	// File primitives
 	data := []byte(`{"ok":true}`)
-	stat, err := fs.AddFileBase64(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
-	if err != nil {
-		log.Fatalf("r1fs upload: %v", err)
-	}
-	fmt.Printf("uploaded CID: %s\n", stat.Path)
+    base64CID, err := fs.AddFileBase64(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
+    if err != nil {
+        log.Fatalf("r1fs upload: %v", err)
+    }
+    fmt.Printf("uploaded CID: %s\n", base64CID)
 
-	fileStat, err := fs.AddFile(ctx, "artifact.bin", bytes.NewReader([]byte{0xde, 0xad}), 2, nil)
-	if err != nil {
-		log.Fatalf("r1fs add_file: %v", err)
-	}
-	loc, err := fs.GetFile(ctx, fileStat.Path, "")
+    fileCID, err := fs.AddFile(ctx, "artifact.bin", bytes.NewReader([]byte{0xde, 0xad}), 2, nil)
+    if err != nil {
+        log.Fatalf("r1fs add_file: %v", err)
+    }
+    loc, err := fs.GetFile(ctx, fileCID, "")
 	if err != nil {
 		log.Fatalf("r1fs get_file: %v", err)
 	}
@@ -201,10 +201,5 @@ make sandbox-dist  # build dist/ratio1-sandbox_<os>_<arch>.tar.gz for release up
 make tag VERSION=v0.1.0
 ```
 
-## Limitations & TODOs
-
-- The CStore REST manager still lacks TTL and conditional write headers; the SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
-- R1FS streaming is implemented via base64 payloads; a TODO tracks upgrading to streaming uploads when supported.
-- CStore `Set` ignores TTL/conditional headers until the REST manager accepts them.
 
 Bug reports and contributions are welcome through pull requests or issues in the Ratio1 organisation.

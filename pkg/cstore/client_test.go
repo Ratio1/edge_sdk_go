@@ -3,9 +3,8 @@ package cstore_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"sync"
 	"testing"
@@ -18,7 +17,7 @@ type counter struct {
 }
 
 func TestClientSetGetAndStatus(t *testing.T) {
-	srv := newTestCStoreServer()
+	srv := newTestCStoreServer(t)
 	defer srv.Close()
 
 	client, err := cstore.New(srv.URL)
@@ -27,13 +26,13 @@ func TestClientSetGetAndStatus(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := client.Set(ctx, "jobs:123", counter{Count: 1}, nil); err != nil {
+	if err := client.Set(ctx, "jobs:123", counter{Count: 1}, nil); err != nil {
 		t.Fatalf("Set jobs:123: %v", err)
 	}
-	if _, err := client.Set(ctx, "jobs:124", counter{Count: 2}, nil); err != nil {
+	if err := client.Set(ctx, "jobs:124", counter{Count: 2}, nil); err != nil {
 		t.Fatalf("Set jobs:124: %v", err)
 	}
-	if _, err := client.HSet(ctx, "jobs", "123", counter{Count: 3}, nil); err != nil {
+	if err := client.HSet(ctx, "jobs", "123", counter{Count: 3}, nil); err != nil {
 		t.Fatalf("HSet: %v", err)
 	}
 
@@ -105,7 +104,7 @@ func TestClientSetGetAndStatus(t *testing.T) {
 }
 
 func TestClientPrimitiveRoundTrips(t *testing.T) {
-	srv := newTestCStoreServer()
+	srv := newTestCStoreServer(t)
 	defer srv.Close()
 
 	client, err := cstore.New(srv.URL)
@@ -127,7 +126,7 @@ func TestClientPrimitiveRoundTrips(t *testing.T) {
 
 	for _, tc := range cases {
 		key := "primitive:" + tc.name
-		if _, err := client.Set(ctx, key, tc.value, nil); err != nil {
+		if err := client.Set(ctx, key, tc.value, nil); err != nil {
 			t.Fatalf("Set %s: %v", tc.name, err)
 		}
 
@@ -181,7 +180,7 @@ func TestClientPrimitiveRoundTrips(t *testing.T) {
 		}
 
 		hashKey := "hash:" + tc.name
-		if _, err := client.HSet(ctx, hashKey, "field", tc.value, nil); err != nil {
+		if err := client.HSet(ctx, hashKey, "field", tc.value, nil); err != nil {
 			t.Fatalf("HSet %s: %v", tc.name, err)
 		}
 
@@ -234,30 +233,8 @@ func TestClientPrimitiveRoundTrips(t *testing.T) {
 	}
 }
 
-func TestSetOptionsUnsupported(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "unexpected call", http.StatusInternalServerError)
-	}))
-	defer srv.Close()
-
-	client, err := cstore.New(srv.URL)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	ctx := context.Background()
-	ttl := 60
-	if _, err := client.Set(ctx, "key", counter{Count: 1}, &cstore.SetOptions{TTLSeconds: &ttl}); !errors.Is(err, cstore.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature for TTL, got %v", err)
-	}
-
-	if _, err := client.Set(ctx, "key", counter{Count: 1}, &cstore.SetOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrUnsupportedFeature) {
-		t.Fatalf("expected ErrUnsupportedFeature for IfAbsent, got %v", err)
-	}
-}
-
 func TestClientWriteRejectsFalseResult(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/set":
@@ -267,7 +244,8 @@ func TestClientWriteRejectsFalseResult(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
+	})
+	srv := newLocalHTTPServer(t, handler)
 	defer srv.Close()
 
 	client, err := cstore.New(srv.URL)
@@ -275,21 +253,21 @@ func TestClientWriteRejectsFalseResult(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	if _, err := client.Set(context.Background(), "jobs:1", counter{Count: 1}, nil); err == nil {
+	if err := client.Set(context.Background(), "jobs:1", counter{Count: 1}, nil); err == nil {
 		t.Fatalf("expected error for rejected set")
 	}
 
-	if _, err := client.HSet(context.Background(), "jobs", "1", counter{Count: 2}, nil); err == nil {
+	if err := client.HSet(context.Background(), "jobs", "1", counter{Count: 2}, nil); err == nil {
 		t.Fatalf("expected error for rejected hset")
 	}
 }
 
-func newTestCStoreServer() *httptest.Server {
+func newTestCStoreServer(t *testing.T) *testServer {
 	store := map[string]json.RawMessage{}
 	hashStore := map[string]map[string]json.RawMessage{}
 	var mu sync.Mutex
 
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/set":
 			defer r.Body.Close()
@@ -405,5 +383,38 @@ func newTestCStoreServer() *httptest.Server {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
+	})
+
+	return newLocalHTTPServer(t, handler)
+}
+
+type testServer struct {
+	URL      string
+	listener net.Listener
+	server   *http.Server
+}
+
+func (s *testServer) Close() {
+	_ = s.server.Shutdown(context.Background())
+	_ = s.listener.Close()
+}
+
+func newLocalHTTPServer(t *testing.T, handler http.Handler) *testServer {
+	t.Helper()
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("network disabled for tests: %v", err)
+	}
+	srv := &http.Server{Handler: handler}
+	ts := &testServer{
+		URL:      "http://" + ln.Addr().String(),
+		listener: ln,
+		server:   srv,
+	}
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			t.Logf("test server serve error: %v", err)
+		}
+	}()
+	return ts
 }

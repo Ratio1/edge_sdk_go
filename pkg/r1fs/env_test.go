@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestNewFromEnvHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/get_file_base64":
 			w.Header().Set("Content-Type", "application/json")
@@ -26,7 +25,8 @@ func TestNewFromEnvHTTP(t *testing.T) {
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})
+	srv := newLocalHTTPServer(t, handler)
 	defer srv.Close()
 
 	t.Setenv("R1_RUNTIME_MODE", "http")
@@ -58,12 +58,12 @@ func TestNewFromEnvMockFallback(t *testing.T) {
 	}
 
 	payload := strings.NewReader("hello")
-	stat, err := client.AddFileBase64(context.Background(), "hello.txt", payload, int64(payload.Len()), nil)
+	cid, err := client.AddFileBase64(context.Background(), "hello.txt", payload, int64(payload.Len()), nil)
 	if err != nil {
 		t.Fatalf("AddFileBase64: %v", err)
 	}
-	if stat.Path == "" {
-		t.Fatalf("AddFileBase64 returned empty path")
+	if cid == "" {
+		t.Fatalf("AddFileBase64 returned empty cid")
 	}
 }
 

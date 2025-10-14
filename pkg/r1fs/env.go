@@ -68,7 +68,7 @@ type mockBackend struct {
 	store *mockFS
 }
 
-func (b *mockBackend) AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
+func (b *mockBackend) AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (string, error) {
 	return b.store.addFileBase64(ctx, filename, data, size, opts)
 }
 
@@ -76,9 +76,8 @@ func (b *mockBackend) GetFileBase64(ctx context.Context, cid string, secret stri
 	return b.store.getFileBase64(ctx, cid, secret)
 }
 
-func (b *mockBackend) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
-	stat, _, err := b.store.addFile(ctx, filename, data, size, opts)
-	return stat, err
+func (b *mockBackend) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (string, error) {
+	return b.store.addFile(ctx, filename, data, size, opts)
 }
 
 func (b *mockBackend) GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error) {

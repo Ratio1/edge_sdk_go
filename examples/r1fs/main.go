@@ -28,24 +28,24 @@ func main() {
 
 	fmt.Println("== AddFileBase64 and GetFileBase64 ==")
 	payload := []byte("hello from r1fs")
-	stat, err := client.AddFileBase64(ctx, "assets/hello.txt", bytes.NewReader(payload), int64(len(payload)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	base64CID, err := client.AddFileBase64(ctx, "assets/hello.txt", bytes.NewReader(payload), int64(len(payload)), &r1fs.UploadOptions{ContentType: "text/plain"})
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("uploaded CID: %s size: %d\n", stat.Path, stat.Size)
+	fmt.Printf("uploaded CID: %s size: %d\n", base64CID, len(payload))
 
-	data, filename, err := client.GetFileBase64(ctx, stat.Path, "")
+	data, filename, err := client.GetFileBase64(ctx, base64CID, "")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("downloaded contents: %q (filename: %s)\n", string(data), filename)
 
 	fmt.Println("\n== AddFile (multipart) and GetFile metadata ==")
-	fileStat, err := client.AddFile(ctx, "report.bin", bytes.NewReader([]byte{0xde, 0xad, 0xbe, 0xef}), 4, &r1fs.UploadOptions{Metadata: map[string]string{"origin": "example"}})
+	fileCID, err := client.AddFile(ctx, "report.bin", bytes.NewReader([]byte{0xde, 0xad, 0xbe, 0xef}), 4, &r1fs.UploadOptions{Metadata: map[string]string{"origin": "example"}})
 	if err != nil {
 		panic(err)
 	}
-	loc, err := client.GetFile(ctx, fileStat.Path, "")
+	loc, err := client.GetFile(ctx, fileCID, "")
 	if err != nil {
 		panic(err)
 	}
