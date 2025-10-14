@@ -16,14 +16,14 @@ type sample struct {
 	Value string `json:"value"`
 }
 
-func TestMockPutGetTTL(t *testing.T) {
+func TestMockSetGetTTL(t *testing.T) {
 	now := time.Now().UTC()
 	m := mock.New(mock.WithClock(func() time.Time { return now }))
 	ctx := context.Background()
 	ttl := 1
 
-	if _, err := mock.Put(ctx, m, "foo", sample{Value: "fresh"}, &cstore.PutOptions{TTLSeconds: &ttl}); err != nil {
-		t.Fatalf("Put: %v", err)
+	if _, err := mock.Set(ctx, m, "foo", sample{Value: "fresh"}, &cstore.SetOptions{TTLSeconds: &ttl}); err != nil {
+		t.Fatalf("Set: %v", err)
 	}
 	item, err := mock.Get[sample](ctx, m, "foo")
 	if err != nil {
@@ -48,59 +48,54 @@ func TestMockConditionalWrites(t *testing.T) {
 	m := mock.New(mock.WithClock(func() time.Time { return now }))
 	ctx := context.Background()
 
-	item, err := mock.Put(ctx, m, "key", sample{Value: "v1"}, nil)
+	item, err := mock.Set(ctx, m, "key", sample{Value: "v1"}, nil)
 	if err != nil {
-		t.Fatalf("Put initial: %v", err)
+		t.Fatalf("Set initial: %v", err)
 	}
 
-	if _, err := mock.Put(ctx, m, "key", sample{Value: "second"}, &cstore.PutOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrPreconditionFailed) {
+	if _, err := mock.Set(ctx, m, "key", sample{Value: "second"}, &cstore.SetOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrPreconditionFailed) {
 		t.Fatalf("expected ErrPreconditionFailed for IfAbsent, got %v", err)
 	}
 
-	if _, err := mock.Put(ctx, m, "key", sample{Value: "second"}, &cstore.PutOptions{IfETagMatch: "wrong"}); !errors.Is(err, cstore.ErrPreconditionFailed) {
+	if _, err := mock.Set(ctx, m, "key", sample{Value: "second"}, &cstore.SetOptions{IfETagMatch: "wrong"}); !errors.Is(err, cstore.ErrPreconditionFailed) {
 		t.Fatalf("expected ErrPreconditionFailed for bad ETag, got %v", err)
 	}
 
-	updated, err := mock.Put(ctx, m, "key", sample{Value: "second"}, &cstore.PutOptions{IfETagMatch: item.ETag})
+	updated, err := mock.Set(ctx, m, "key", sample{Value: "second"}, &cstore.SetOptions{IfETagMatch: item.ETag})
 	if err != nil {
-		t.Fatalf("conditional Put: %v", err)
+		t.Fatalf("conditional Set: %v", err)
 	}
 	if updated.Value.Value != "second" || updated.ETag == item.ETag {
 		t.Fatalf("expected value updated with new etag: %#v", updated)
 	}
 }
 
-func TestMockList(t *testing.T) {
+func TestMockGetStatus(t *testing.T) {
 	m := mock.New()
 	ctx := context.Background()
 
-	if _, err := mock.Put(ctx, m, "jobs:1", sample{Value: "one"}, nil); err != nil {
-		t.Fatalf("Put: %v", err)
+	if _, err := mock.Set(ctx, m, "jobs:2", sample{Value: "two"}, nil); err != nil {
+		t.Fatalf("Set jobs:2: %v", err)
 	}
-	if _, err := mock.Put(ctx, m, "jobs:2", sample{Value: "two"}, nil); err != nil {
-		t.Fatalf("Put: %v", err)
-	}
-	if _, err := mock.Put(ctx, m, "logs:1", sample{Value: "ignore"}, nil); err != nil {
-		t.Fatalf("Put: %v", err)
+	if _, err := mock.Set(ctx, m, "jobs:1", sample{Value: "one"}, nil); err != nil {
+		t.Fatalf("Set jobs:1: %v", err)
 	}
 
-	page, err := mock.List[sample](ctx, m, "jobs:", "", 1)
+	status, err := mock.GetStatus(ctx, m)
 	if err != nil {
-		t.Fatalf("List page1: %v", err)
+		t.Fatalf("GetStatus: %v", err)
 	}
-	if len(page.Items) != 1 || page.Items[0].Key != "jobs:1" {
-		t.Fatalf("unexpected page1: %#v", page)
+	if status == nil {
+		t.Fatalf("expected non-nil status")
 	}
-	if page.NextCursor == "" {
-		t.Fatalf("expected next cursor")
+	want := []string{"jobs:1", "jobs:2"}
+	if len(status.Keys) != len(want) {
+		t.Fatalf("unexpected keys: %#v", status.Keys)
 	}
-
-	page2, err := mock.List[sample](ctx, m, "jobs:", page.NextCursor, 5)
-	if err != nil {
-		t.Fatalf("List page2: %v", err)
-	}
-	if len(page2.Items) != 1 || page2.Items[0].Key != "jobs:2" || page2.NextCursor != "" {
-		t.Fatalf("unexpected page2: %#v", page2)
+	for i, key := range want {
+		if status.Keys[i] != key {
+			t.Fatalf("GetStatus mismatch at %d: got %q want %q", i, status.Keys[i], key)
+		}
 	}
 }
 
@@ -142,11 +137,11 @@ func TestMockHashOperations(t *testing.T) {
 		t.Fatalf("unexpected HGet result: %#v", got)
 	}
 
-	if _, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "second"}, &cstore.PutOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrPreconditionFailed) {
+	if _, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "second"}, &cstore.SetOptions{IfAbsent: true}); !errors.Is(err, cstore.ErrPreconditionFailed) {
 		t.Fatalf("expected ErrPreconditionFailed for hash IfAbsent, got %v", err)
 	}
 
-	updated, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "second"}, &cstore.PutOptions{IfETagMatch: item.ETag})
+	updated, err := mock.HSet(ctx, m, "jobs", "123", sample{Value: "second"}, &cstore.SetOptions{IfETagMatch: item.ETag})
 	if err != nil {
 		t.Fatalf("conditional HSet: %v", err)
 	}

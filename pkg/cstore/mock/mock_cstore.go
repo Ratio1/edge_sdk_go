@@ -99,14 +99,34 @@ func Get[T any](ctx context.Context, store *Mock, key string) (*cstore.Item[T], 
 	return getItem[T](ctx, store, key)
 }
 
-// Put writes a value and returns the stored item.
-func Put[T any](ctx context.Context, store *Mock, key string, value T, opts *cstore.PutOptions) (*cstore.Item[T], error) {
-	return putItem(ctx, store, key, value, opts)
+// Set writes a value and returns the stored item.
+func Set[T any](ctx context.Context, store *Mock, key string, value T, opts *cstore.SetOptions) (*cstore.Item[T], error) {
+	return setItem(ctx, store, key, value, opts)
 }
 
-// List enumerates keys matching the prefix.
-func List[T any](ctx context.Context, store *Mock, prefix string, cursor string, limit int) (*cstore.ListResult[T], error) {
-	return listItems[T](ctx, store, prefix, cursor, limit)
+// GetStatus reports the in-memory keys currently stored.
+func GetStatus(ctx context.Context, store *Mock) (*cstore.Status, error) {
+	if store == nil {
+		return nil, fmt.Errorf("mock cstore: store is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	now := store.clock()
+	keys := make([]string, 0, len(store.items))
+	for key, ent := range store.items {
+		if ent.expired(now) {
+			delete(store.items, key)
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return &cstore.Status{Keys: keys}, nil
 }
 
 // HGet retrieves a hash field decoded into T.
@@ -115,8 +135,8 @@ func HGet[T any](ctx context.Context, store *Mock, hashKey, field string) (*csto
 }
 
 // HSet writes a hash field and returns the stored item.
-func HSet[T any](ctx context.Context, store *Mock, hashKey, field string, value T, opts *cstore.PutOptions) (*cstore.HashItem[T], error) {
-	return putHashItem(ctx, store, hashKey, field, value, opts)
+func HSet[T any](ctx context.Context, store *Mock, hashKey, field string, value T, opts *cstore.SetOptions) (*cstore.HashItem[T], error) {
+	return setHashItem(ctx, store, hashKey, field, value, opts)
 }
 
 // HGetAll retrieves all hash fields for a hash key.
@@ -164,7 +184,7 @@ func getItem[T any](ctx context.Context, store *Mock, key string) (*cstore.Item[
 	}, nil
 }
 
-func putItem[T any](ctx context.Context, store *Mock, key string, value T, opts *cstore.PutOptions) (*cstore.Item[T], error) {
+func setItem[T any](ctx context.Context, store *Mock, key string, value T, opts *cstore.SetOptions) (*cstore.Item[T], error) {
 	if strings.TrimSpace(key) == "" {
 		return nil, fmt.Errorf("mock cstore: key is required")
 	}
@@ -218,75 +238,6 @@ func putItem[T any](ctx context.Context, store *Mock, key string, value T, opts 
 		Value:     value,
 		ETag:      newEntry.etag,
 		ExpiresAt: expiresPtr,
-	}, nil
-}
-
-func listItems[T any](ctx context.Context, store *Mock, prefix string, cursor string, limit int) (*cstore.ListResult[T], error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-
-	now := store.clock()
-	keys := make([]string, 0, len(store.items))
-	for key, ent := range store.items {
-		if ent.expired(now) {
-			delete(store.items, key)
-			continue
-		}
-		if prefix == "" || strings.HasPrefix(key, prefix) {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-
-	start := 0
-	if cursor != "" {
-		idx := sort.SearchStrings(keys, cursor)
-		for idx < len(keys) && keys[idx] <= cursor {
-			idx++
-		}
-		start = idx
-	}
-	if start > len(keys) {
-		start = len(keys)
-	}
-
-	end := len(keys)
-	if limit > 0 && start+limit < end {
-		end = start + limit
-	}
-
-	items := make([]cstore.Item[T], 0, end-start)
-	for _, key := range keys[start:end] {
-		ent := store.items[key]
-		var value T
-		if err := json.Unmarshal(ent.data, &value); err != nil {
-			return nil, fmt.Errorf("mock cstore: decode value: %w", err)
-		}
-		var expiresPtr *time.Time
-		if !ent.expiresAt.IsZero() {
-			expires := ent.expiresAt
-			expiresPtr = &expires
-		}
-		items = append(items, cstore.Item[T]{
-			Key:       key,
-			Value:     value,
-			ETag:      ent.etag,
-			ExpiresAt: expiresPtr,
-		})
-	}
-
-	nextCursor := ""
-	if end < len(keys) && end > 0 {
-		nextCursor = keys[end-1]
-	}
-
-	return &cstore.ListResult[T]{
-		Items:      items,
-		NextCursor: nextCursor,
 	}, nil
 }
 
@@ -348,7 +299,7 @@ func getHashItem[T any](ctx context.Context, store *Mock, hashKey, field string)
 	}, nil
 }
 
-func putHashItem[T any](ctx context.Context, store *Mock, hashKey, field string, value T, opts *cstore.PutOptions) (*cstore.HashItem[T], error) {
+func setHashItem[T any](ctx context.Context, store *Mock, hashKey, field string, value T, opts *cstore.SetOptions) (*cstore.HashItem[T], error) {
 	if strings.TrimSpace(hashKey) == "" {
 		return nil, fmt.Errorf("mock cstore: hash key is required")
 	}

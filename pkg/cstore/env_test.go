@@ -62,8 +62,8 @@ func TestNewFromEnvMockFallback(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := client.Put(ctx, "key", map[string]int{"count": 1}, nil); err != nil {
-		t.Fatalf("mock Put: %v", err)
+	if _, err := client.Set(ctx, "key", map[string]int{"count": 1}, nil); err != nil {
+		t.Fatalf("mock Set: %v", err)
 	}
 }
 

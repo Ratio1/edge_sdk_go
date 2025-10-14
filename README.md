@@ -120,8 +120,8 @@ func main() {
 
 	// Key/value primitives
 	counter := Counter{Count: 1}
-	if _, err := cs.Put(ctx, "jobs:123", counter, nil); err != nil {
-		log.Fatalf("cstore put: %v", err)
+	if _, err := cs.Set(ctx, "jobs:123", counter, nil); err != nil {
+		log.Fatalf("cstore set: %v", err)
 	}
 	var stored Counter
 	if _, err := cs.Get(ctx, "jobs:123", &stored); err != nil {
@@ -129,14 +129,13 @@ func main() {
 	}
 	fmt.Println("retrieved counter:", stored.Count)
 
-	if _, err := cs.PutJSON(ctx, "jobs:meta", `{"owner":"alice"}`, nil); err != nil {
-		log.Fatalf("cstore put json: %v", err)
-	}
-	raw, err := cs.GetJSON(ctx, "jobs:meta")
+	status, err := cs.GetStatus(ctx)
 	if err != nil {
-		log.Fatalf("cstore get json: %v", err)
+		log.Fatalf("cstore get_status: %v", err)
 	}
-	fmt.Println("raw metadata:", string(raw))
+	if status != nil {
+		fmt.Println("stored keys:", status.Keys)
+	}
 
 	if _, err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
 		log.Fatalf("cstore hset: %v", err)
@@ -188,7 +187,7 @@ func main() {
 ## Examples
 
 - `examples/runtime_modes` – spins up local test servers and shows how `http`, `auto`, and `mock` resolution behaves.
-- `examples/cstore` – exercises every public CStore helper including JSON and hash utilities.
+- `examples/cstore` – exercises the supported CStore operations (Set/Get/HSet/HGet/HGetAll/GetStatus).
 - `examples/r1fs` – demonstrates uploads, metadata lookups, and YAML helpers against a simulated manager.
 
 ## Development
@@ -206,6 +205,6 @@ make tag VERSION=v0.1.0
 
 - The CStore REST manager still lacks TTL and conditional write headers; the SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
 - R1FS streaming is implemented via base64 payloads; a TODO tracks upgrading to streaming uploads when supported.
-- CStore `Put` ignores TTL/conditional headers until the REST manager accepts them.
+- CStore `Set` ignores TTL/conditional headers until the REST manager accepts them.
 
 Bug reports and contributions are welcome through pull requests or issues in the Ratio1 organisation.

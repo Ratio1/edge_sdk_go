@@ -63,7 +63,7 @@ func (s *mockStore) seed(entries []devseed.CStoreSeedEntry) error {
 	return nil
 }
 
-func (s *mockStore) getRaw(ctx context.Context, key string) ([]byte, error) {
+func (s *mockStore) get(ctx context.Context, key string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (s *mockStore) getRaw(ctx context.Context, key string) ([]byte, error) {
 	return append([]byte(nil), ent.data...), nil
 }
 
-func (s *mockStore) putRaw(ctx context.Context, key string, raw []byte, opts *PutOptions) (*mockEntry, error) {
+func (s *mockStore) set(ctx context.Context, key string, raw []byte, opts *SetOptions) (*mockEntry, error) {
 	if strings.TrimSpace(key) == "" {
 		return nil, fmt.Errorf("mock cstore: key is required")
 	}
@@ -118,7 +118,7 @@ func (s *mockStore) putRaw(ctx context.Context, key string, raw []byte, opts *Pu
 	return newEntry, nil
 }
 
-func (s *mockStore) listKeys(ctx context.Context) ([]string, error) {
+func (s *mockStore) status(ctx context.Context) (*Status, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -135,10 +135,10 @@ func (s *mockStore) listKeys(ctx context.Context) ([]string, error) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	return keys, nil
+	return &Status{Keys: keys}, nil
 }
 
-func (s *mockStore) hGetRaw(ctx context.Context, hashKey, field string) ([]byte, error) {
+func (s *mockStore) hGet(ctx context.Context, hashKey, field string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *mockStore) hGetRaw(ctx context.Context, hashKey, field string) ([]byte,
 	return append([]byte(nil), ent.data...), nil
 }
 
-func (s *mockStore) hSetRaw(ctx context.Context, hashKey, field string, raw []byte, opts *PutOptions) (*mockEntry, error) {
+func (s *mockStore) hSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) (*mockEntry, error) {
 	if strings.TrimSpace(hashKey) == "" {
 		return nil, fmt.Errorf("mock cstore: hash key is required")
 	}
@@ -209,7 +209,7 @@ func (s *mockStore) hSetRaw(ctx context.Context, hashKey, field string, raw []by
 	return newEntry, nil
 }
 
-func (s *mockStore) hGetAllRaw(ctx context.Context, hashKey string) (map[string][]byte, error) {
+func (s *mockStore) hGetAll(ctx context.Context, hashKey string) (map[string][]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

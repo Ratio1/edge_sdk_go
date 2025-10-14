@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
-	"strconv"
 	"sync"
 
 	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
@@ -28,7 +27,7 @@ func main() {
 	ctx := context.Background()
 
 	fmt.Println("== Put/Get ==")
-	if _, err := client.Put(ctx, "jobs:1", counter{Count: 1}, nil); err != nil {
+	if _, err := client.Set(ctx, "jobs:1", counter{Count: 1}, nil); err != nil {
 		panic(err)
 	}
 	var itemValue counter
@@ -37,40 +36,13 @@ func main() {
 	}
 	fmt.Printf("jobs:1 => %+v\n", itemValue)
 
-	fmt.Println("\n== PutJSON/GetJSON ==")
-	if _, err := client.PutJSON(ctx, "jobs:meta", `{"owner":"alice"}`, nil); err != nil {
-		panic(err)
-	}
-	jsonBytes, err := client.GetJSON(ctx, "jobs:meta")
+	fmt.Println("\n== GetStatus ==")
+	status, err := client.GetStatus(ctx)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("jobs:meta raw JSON: %s\n", string(jsonBytes))
-
-	fmt.Println("\n== List with pagination ==")
-	page, err := client.List(ctx, "jobs:", "", 1)
-	if err != nil {
-		panic(err)
-	}
-	for _, it := range page.Items {
-		var value counter
-		if err := json.Unmarshal(it.Value, &value); err != nil {
-			panic(err)
-		}
-		fmt.Printf("page1 -> %s: %+v\n", it.Key, value)
-	}
-	if page.NextCursor != "" {
-		page2, err := client.List(ctx, "jobs:", page.NextCursor, 1)
-		if err != nil {
-			panic(err)
-		}
-		for _, it := range page2.Items {
-			var value counter
-			if err := json.Unmarshal(it.Value, &value); err != nil {
-				panic(err)
-			}
-			fmt.Printf("page2 -> %s: %+v\n", it.Key, value)
-		}
+	if status != nil {
+		fmt.Printf("keys => %v\n", status.Keys)
 	}
 
 	fmt.Println("\n== Hash operations (HSet/HGet/HGetAll) ==")
@@ -101,23 +73,23 @@ func main() {
 func newCStoreServer() *httptest.Server {
 	var (
 		mu    sync.Mutex
-		store = map[string]string{}
-		hash  = map[string]map[string]string{}
+		store = map[string]json.RawMessage{}
+		hash  = map[string]map[string]json.RawMessage{}
 	)
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/set":
 			var payload struct {
-				Key   string `json:"key"`
-				Value string `json:"value"`
+				Key   string          `json:"key"`
+				Value json.RawMessage `json:"value"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			mu.Lock()
-			store[payload.Key] = payload.Value
+			store[payload.Key] = append([]byte(nil), payload.Value...)
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte("true"))
@@ -134,8 +106,8 @@ func newCStoreServer() *httptest.Server {
 			}
 			// Upstream wraps the JSON payload inside result
 			resp := struct {
-				Result string `json:"result"`
-			}{Result: strconv.Quote(value)}
+				Result json.RawMessage `json:"result"`
+			}{Result: value}
 			_ = json.NewEncoder(w).Encode(resp)
 
 		case "/get_status":
@@ -153,9 +125,9 @@ func newCStoreServer() *httptest.Server {
 
 		case "/hset":
 			var req struct {
-				HashKey string `json:"hkey"`
-				Field   string `json:"key"`
-				Value   string `json:"value"`
+				HashKey string          `json:"hkey"`
+				Field   string          `json:"key"`
+				Value   json.RawMessage `json:"value"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -164,10 +136,10 @@ func newCStoreServer() *httptest.Server {
 			mu.Lock()
 			bucket := hash[req.HashKey]
 			if bucket == nil {
-				bucket = make(map[string]string)
+				bucket = make(map[string]json.RawMessage)
 				hash[req.HashKey] = bucket
 			}
-			bucket[req.Field] = req.Value
+			bucket[req.Field] = append([]byte(nil), req.Value...)
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte("true"))
@@ -185,8 +157,8 @@ func newCStoreServer() *httptest.Server {
 				return
 			}
 			resp := struct {
-				Result string `json:"result"`
-			}{Result: strconv.Quote(value)}
+				Result json.RawMessage `json:"result"`
+			}{Result: value}
 			_ = json.NewEncoder(w).Encode(resp)
 
 		case "/hgetall":
@@ -201,12 +173,12 @@ func newCStoreServer() *httptest.Server {
 			}
 			payload := make(map[string]json.RawMessage, len(bucket))
 			for field, val := range bucket {
-				payload[field] = json.RawMessage([]byte(val))
+				payload[field] = val
 			}
 			encoded, _ := json.Marshal(payload)
 			resp := struct {
-				Result string `json:"result"`
-			}{Result: string(encoded)}
+				Result json.RawMessage `json:"result"`
+			}{Result: json.RawMessage(encoded)}
 			_ = json.NewEncoder(w).Encode(resp)
 
 		default:

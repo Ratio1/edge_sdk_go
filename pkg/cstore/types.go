@@ -13,6 +13,11 @@ type Item[T any] struct {
 	ExpiresAt *time.Time
 }
 
+// Status describes the payload returned by /get_status.
+type Status struct {
+	Keys []string `json:"keys"`
+}
+
 // HashItem represents a field stored under a hash key.
 type HashItem[T any] struct {
 	HashKey   string
@@ -22,17 +27,11 @@ type HashItem[T any] struct {
 	ExpiresAt *time.Time
 }
 
-// PutOptions controls write semantics for Put operations.
-type PutOptions struct {
+// SetOptions controls write semantics for Set operations.
+type SetOptions struct {
 	TTLSeconds  *int
 	IfETagMatch string
 	IfAbsent    bool
-}
-
-// ListResult captures a paginated set of items.
-type ListResult[T any] struct {
-	Items      []Item[T]
-	NextCursor string
 }
 
 var (
