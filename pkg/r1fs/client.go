@@ -22,7 +22,7 @@ type Client struct {
 }
 
 // New constructs an HTTP-backed client.
-func New(baseURL string, opts ...httpx.Option) (*Client, error) {
+func New(baseURL string, opts ...httpx.Option) (client *Client, err error) {
 	cl, err := httpx.NewClient(baseURL, opts...)
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func NewWithBackend(b Backend) *Client {
 }
 
 // AddFileBase64 writes data via /add_file_base64 and returns the upstream CID.
-func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (string, error) {
+func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (cid string, err error) {
 	if strings.TrimSpace(filename) == "" {
 		return "", fmt.Errorf("r1fs: filename is required")
 	}
@@ -56,7 +56,7 @@ func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Rea
 }
 
 // AddFile uploads data using the /add_file endpoint (multipart form upload) and returns the upstream CID.
-func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (string, error) {
+func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (cid string, err error) {
 	if strings.TrimSpace(filename) == "" {
 		return "", fmt.Errorf("r1fs: filename is required")
 	}
@@ -71,7 +71,7 @@ func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, s
 }
 
 // GetFileBase64 retrieves and decodes data via /get_file_base64, returning the upstream filename.
-func (c *Client) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {
+func (c *Client) GetFileBase64(ctx context.Context, cid string, secret string) (fileData []byte, fileName string, err error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, "", fmt.Errorf("r1fs: cid is required")
 	}
@@ -82,7 +82,7 @@ func (c *Client) GetFileBase64(ctx context.Context, cid string, secret string) (
 }
 
 // GetFile resolves a CID to the on-disk path reported by /get_file.
-func (c *Client) GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error) {
+func (c *Client) GetFile(ctx context.Context, cid string, secret string) (location *FileLocation, err error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, fmt.Errorf("r1fs: cid is required")
 	}
@@ -93,7 +93,7 @@ func (c *Client) GetFile(ctx context.Context, cid string, secret string) (*FileL
 }
 
 // AddYAML stores structured data as YAML via /add_yaml and returns the assigned CID.
-func (c *Client) AddYAML(ctx context.Context, data any, opts *YAMLOptions) (string, error) {
+func (c *Client) AddYAML(ctx context.Context, data any, opts *YAMLOptions) (cid string, err error) {
 	if data == nil {
 		return "", fmt.Errorf("r1fs: data is required")
 	}
@@ -109,7 +109,7 @@ func (c *Client) AddYAML(ctx context.Context, data any, opts *YAMLOptions) (stri
 }
 
 // GetYAML retrieves YAML content as raw JSON. Provide out to decode into a struct.
-func (c *Client) GetYAML(ctx context.Context, cid string, secret string, out any) (*YAMLDocument[json.RawMessage], error) {
+func (c *Client) GetYAML(ctx context.Context, cid string, secret string, out any) (doc *YAMLDocument[json.RawMessage], err error) {
 	if c == nil {
 		return nil, fmt.Errorf("r1fs: client is nil")
 	}
@@ -117,7 +117,7 @@ func (c *Client) GetYAML(ctx context.Context, cid string, secret string, out any
 	if err != nil {
 		return nil, err
 	}
-	doc, err := decodeYAMLDocument[json.RawMessage](cid, data)
+	doc, err = decodeYAMLDocument[json.RawMessage](cid, data)
 	if err != nil || doc == nil || out == nil {
 		return doc, err
 	}
@@ -193,19 +193,19 @@ func decodeYAMLDocument[T any](cid string, data []byte) (*YAMLDocument[T], error
 }
 
 type Backend interface {
-	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (string, error)
-	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (string, error)
-	GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error)
-	GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error)
-	AddYAML(ctx context.Context, data any, filename string, secret string) (string, error)
-	GetYAML(ctx context.Context, cid string, secret string) ([]byte, error)
+	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (cid string, err error)
+	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (cid string, err error)
+	GetFileBase64(ctx context.Context, cid string, secret string) (fileData []byte, fileName string, err error)
+	GetFile(ctx context.Context, cid string, secret string) (location *FileLocation, err error)
+	AddYAML(ctx context.Context, data any, filename string, secret string) (cid string, err error)
+	GetYAML(ctx context.Context, cid string, secret string) (payload []byte, err error)
 }
 
 type httpBackend struct {
 	client *httpx.Client
 }
 
-func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (string, error) {
+func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
@@ -257,7 +257,7 @@ func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data [
 	return response.CID, nil
 }
 
-func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (string, error) {
+func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
@@ -325,7 +325,7 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 	return response.CID, nil
 }
 
-func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {
+func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) (fileData []byte, fileName string, err error) {
 	if b == nil || b.client == nil {
 		return nil, "", fmt.Errorf("r1fs: http backend not configured")
 	}
@@ -370,7 +370,7 @@ func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret stri
 	return data, result.Filename, nil
 }
 
-func (b *httpBackend) GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error) {
+func (b *httpBackend) GetFile(ctx context.Context, cid string, secret string) (location *FileLocation, err error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("r1fs: http backend not configured")
 	}
@@ -413,7 +413,7 @@ func (b *httpBackend) GetFile(ctx context.Context, cid string, secret string) (*
 	return loc, nil
 }
 
-func (b *httpBackend) AddYAML(ctx context.Context, data any, filename string, secret string) (string, error) {
+func (b *httpBackend) AddYAML(ctx context.Context, data any, filename string, secret string) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
@@ -459,7 +459,7 @@ func (b *httpBackend) AddYAML(ctx context.Context, data any, filename string, se
 	return response.CID, nil
 }
 
-func (b *httpBackend) GetYAML(ctx context.Context, cid string, secret string) ([]byte, error) {
+func (b *httpBackend) GetYAML(ctx context.Context, cid string, secret string) (payload []byte, err error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("r1fs: http backend not configured")
 	}

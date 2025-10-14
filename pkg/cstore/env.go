@@ -22,8 +22,8 @@ const (
 
 // NewFromEnv initialises a Client based on Ratio1 environment variables and
 // returns the resolved mode ("http" or "mock").
-func NewFromEnv() (*Client, string, error) {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv(envMode)))
+func NewFromEnv() (client *Client, mode string, err error) {
+	mode = strings.ToLower(strings.TrimSpace(os.Getenv(envMode)))
 	baseURL := strings.TrimSpace(os.Getenv(envCStoreURL))
 
 	switch mode {

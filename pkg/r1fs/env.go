@@ -20,8 +20,8 @@ const (
 
 // NewFromEnv initialises an R1FS client based on Ratio1 environment variables
 // and returns the resolved mode ("http" or "mock").
-func NewFromEnv() (*Client, string, error) {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv(envR1Mode)))
+func NewFromEnv() (client *Client, mode string, err error) {
+	mode = strings.ToLower(strings.TrimSpace(os.Getenv(envR1Mode)))
 	baseURL := strings.TrimSpace(os.Getenv(envR1FSURL))
 
 	switch mode {

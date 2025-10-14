@@ -50,7 +50,7 @@ func (m *Mock) Seed(entries []devseed.CStoreSeedEntry) error {
 }
 
 // Get retrieves a value decoded into T.
-func Get[T any](ctx context.Context, store *Mock, key string) (*cstore.Item[T], error) {
+func Get[T any](ctx context.Context, store *Mock, key string) (item *cstore.Item[T], err error) {
 	return getItem[T](ctx, store, key)
 }
 
@@ -60,7 +60,7 @@ func Set[T any](ctx context.Context, store *Mock, key string, value T, opts *cst
 }
 
 // GetStatus reports the in-memory keys currently stored.
-func GetStatus(ctx context.Context, store *Mock) (*cstore.Status, error) {
+func GetStatus(ctx context.Context, store *Mock) (status *cstore.Status, err error) {
 	if store == nil {
 		return nil, fmt.Errorf("mock cstore: store is nil")
 	}
@@ -80,7 +80,7 @@ func GetStatus(ctx context.Context, store *Mock) (*cstore.Status, error) {
 }
 
 // HGet retrieves a hash field decoded into T.
-func HGet[T any](ctx context.Context, store *Mock, hashKey, field string) (*cstore.HashItem[T], error) {
+func HGet[T any](ctx context.Context, store *Mock, hashKey, field string) (item *cstore.HashItem[T], err error) {
 	return getHashItem[T](ctx, store, hashKey, field)
 }
 
@@ -90,7 +90,7 @@ func HSet[T any](ctx context.Context, store *Mock, hashKey, field string, value 
 }
 
 // HGetAll retrieves all hash fields for a hash key.
-func HGetAll[T any](ctx context.Context, store *Mock, hashKey string) ([]cstore.HashItem[T], error) {
+func HGetAll[T any](ctx context.Context, store *Mock, hashKey string) (items []cstore.HashItem[T], err error) {
 	return listHashItems[T](ctx, store, hashKey)
 }
 

@@ -61,7 +61,7 @@ func (m *Mock) Seed(entries []devseed.R1FSSeedEntry) error {
 }
 
 // AddFileBase64 stores file contents via the base64 upload flow.
-func (m *Mock) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *r1fs.UploadOptions) (string, error) {
+func (m *Mock) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *r1fs.UploadOptions) (cid string, err error) {
 	if strings.TrimSpace(filename) == "" {
 		return "", fmt.Errorf("mock r1fs: filename is required")
 	}
@@ -78,7 +78,7 @@ func (m *Mock) AddFileBase64(ctx context.Context, filename string, data io.Reade
 }
 
 // AddFile stores contents using a generated CID, mimicking /add_file behaviour.
-func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *r1fs.UploadOptions) (string, error) {
+func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *r1fs.UploadOptions) (cid string, err error) {
 	if strings.TrimSpace(filename) == "" {
 		return "", fmt.Errorf("mock r1fs: filename is required")
 	}
@@ -95,7 +95,7 @@ func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, _ int6
 	}
 	entry.metadata["r1fs.filename"] = filename
 
-	cid := newETag()
+	cid = newETag()
 	norm := normalizePath(cid)
 
 	m.mu.Lock()
@@ -113,7 +113,7 @@ func (m *Mock) AddFile(ctx context.Context, filename string, data []byte, _ int6
 }
 
 // GetFileBase64 returns stored file contents and filename.
-func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) ([]byte, string, error) {
+func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) (fileData []byte, fileName string, err error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, "", fmt.Errorf("mock r1fs: cid is required")
 	}
@@ -137,7 +137,7 @@ func (m *Mock) GetFileBase64(ctx context.Context, cid string, _ string) ([]byte,
 }
 
 // GetFile resolves metadata for a stored CID.
-func (m *Mock) GetFile(ctx context.Context, cid string, _ string) (*r1fs.FileLocation, error) {
+func (m *Mock) GetFile(ctx context.Context, cid string, _ string) (location *r1fs.FileLocation, err error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, fmt.Errorf("mock r1fs: cid is required")
 	}
@@ -170,7 +170,7 @@ func (m *Mock) GetFile(ctx context.Context, cid string, _ string) (*r1fs.FileLoc
 }
 
 // AddYAML stores structured data and returns a CID.
-func (m *Mock) AddYAML(ctx context.Context, data any, filename string, secret string) (string, error) {
+func (m *Mock) AddYAML(ctx context.Context, data any, filename string, secret string) (cid string, err error) {
 	if data == nil {
 		return "", fmt.Errorf("mock r1fs: yaml data is required")
 	}
@@ -184,7 +184,7 @@ func (m *Mock) AddYAML(ctx context.Context, data any, filename string, secret st
 	if strings.TrimSpace(filename) == "" {
 		filename = "document.yaml"
 	}
-	cid, err := m.AddFile(ctx, filename, payload, int64(len(payload)), &r1fs.UploadOptions{Secret: secret})
+	cid, err = m.AddFile(ctx, filename, payload, int64(len(payload)), &r1fs.UploadOptions{Secret: secret})
 	if err != nil {
 		return "", err
 	}
@@ -195,7 +195,7 @@ func (m *Mock) AddYAML(ctx context.Context, data any, filename string, secret st
 }
 
 // GetYAML retrieves YAML data previously stored with AddYAML.
-func (m *Mock) GetYAML(ctx context.Context, cid string, _ string) ([]byte, error) {
+func (m *Mock) GetYAML(ctx context.Context, cid string, _ string) (payload []byte, err error) {
 	if strings.TrimSpace(cid) == "" {
 		return nil, fmt.Errorf("mock r1fs: cid is required")
 	}
@@ -208,7 +208,7 @@ func (m *Mock) GetYAML(ctx context.Context, cid string, _ string) ([]byte, error
 	if !ok {
 		return json.Marshal("error")
 	}
-	payload, err := json.Marshal(map[string]json.RawMessage{"file_data": data})
+	payload, err = json.Marshal(map[string]json.RawMessage{"file_data": data})
 	if err != nil {
 		return nil, err
 	}

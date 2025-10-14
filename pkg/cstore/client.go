@@ -22,7 +22,7 @@ type Client struct {
 }
 
 // New constructs a Client bound to the provided base URL.
-func New(baseURL string, opts ...httpx.Option) (*Client, error) {
+func New(baseURL string, opts ...httpx.Option) (client *Client, err error) {
 	cl, err := httpx.NewClient(baseURL, opts...)
 	if err != nil {
 		return nil, err
@@ -41,8 +41,8 @@ func NewWithBackend(b Backend) *Client {
 }
 
 // Get retrieves a value as raw JSON. Provide out to decode into a struct.
-func (c *Client) Get(ctx context.Context, key string, out any) (*Item[json.RawMessage], error) {
-	item, err := getItem[json.RawMessage](ctx, c, key)
+func (c *Client) Get(ctx context.Context, key string, out any) (item *Item[json.RawMessage], err error) {
+	item, err = getItem[json.RawMessage](ctx, c, key)
 	if err != nil || item == nil {
 		return item, err
 	}
@@ -60,8 +60,8 @@ func (c *Client) Set(ctx context.Context, key string, value any, opts *SetOption
 }
 
 // HGet retrieves a value stored under a hash key and decodes it into the requested type.
-func (c *Client) HGet(ctx context.Context, hashKey, field string, out any) (*HashItem[json.RawMessage], error) {
-	item, err := getHashItem[json.RawMessage](ctx, c, hashKey, field)
+func (c *Client) HGet(ctx context.Context, hashKey, field string, out any) (item *HashItem[json.RawMessage], err error) {
+	item, err = getHashItem[json.RawMessage](ctx, c, hashKey, field)
 	if err != nil || item == nil {
 		return item, err
 	}
@@ -79,12 +79,12 @@ func (c *Client) HSet(ctx context.Context, hashKey, field string, value any, opt
 }
 
 // HGetAll retrieves all fields stored under a hash key.
-func (c *Client) HGetAll(ctx context.Context, hashKey string) ([]HashItem[json.RawMessage], error) {
+func (c *Client) HGetAll(ctx context.Context, hashKey string) (items []HashItem[json.RawMessage], err error) {
 	return getAllHashItems[json.RawMessage](ctx, c, hashKey)
 }
 
 // GetStatus returns the payload exposed by the /get_status endpoint.
-func (c *Client) GetStatus(ctx context.Context) (*Status, error) {
+func (c *Client) GetStatus(ctx context.Context) (status *Status, err error) {
 	if c == nil || c.backend == nil {
 		return nil, fmt.Errorf("cstore: client is nil")
 	}
@@ -96,11 +96,11 @@ func (c *Client) GetStatus(ctx context.Context) (*Status, error) {
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil
 	}
-	var status Status
-	if err := json.Unmarshal(trimmed, &status); err != nil {
+	var statusValue Status
+	if err := json.Unmarshal(trimmed, &statusValue); err != nil {
 		return nil, fmt.Errorf("cstore: decode get_status payload: %w", err)
 	}
-	return &status, nil
+	return &statusValue, nil
 }
 func getItem[T any](ctx context.Context, client *Client, key string) (*Item[T], error) {
 	if client == nil || client.backend == nil {
@@ -295,19 +295,19 @@ func decodeBoolResult(body []byte) (bool, error) {
 }
 
 type Backend interface {
-	Get(ctx context.Context, key string) ([]byte, error)
+	Get(ctx context.Context, key string) (data []byte, err error)
 	Set(ctx context.Context, key string, raw []byte, opts *SetOptions) error
-	HGet(ctx context.Context, hashKey, field string) ([]byte, error)
+	HGet(ctx context.Context, hashKey, field string) (data []byte, err error)
 	HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) error
-	HGetAll(ctx context.Context, hashKey string) ([]byte, error)
-	GetStatus(ctx context.Context) ([]byte, error)
+	HGetAll(ctx context.Context, hashKey string) (data []byte, err error)
+	GetStatus(ctx context.Context) (statusPayload []byte, err error)
 }
 
 type httpBackend struct {
 	client *httpx.Client
 }
 
-func (b *httpBackend) Get(ctx context.Context, key string) ([]byte, error) {
+func (b *httpBackend) Get(ctx context.Context, key string) (data []byte, err error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("cstore: http backend not configured")
 	}
@@ -319,11 +319,11 @@ func (b *httpBackend) Get(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := httpx.ReadAllAndClose(resp.Body)
+	raw, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	payload, err := ratio1api.ExtractResult(data)
+	payload, err := ratio1api.ExtractResult(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (b *httpBackend) Set(ctx context.Context, key string, raw []byte, opts *Set
 	return nil
 }
 
-func (b *httpBackend) GetStatus(ctx context.Context) ([]byte, error) {
+func (b *httpBackend) GetStatus(ctx context.Context) (statusPayload []byte, err error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("cstore: http backend not configured")
 	}
@@ -390,21 +390,21 @@ func (b *httpBackend) GetStatus(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := httpx.ReadAllAndClose(resp.Body)
+	raw, err := httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	payload, err := ratio1api.ExtractResult(data)
+	statusPayload, err = ratio1api.ExtractResult(raw)
 	if err != nil {
 		return nil, fmt.Errorf("cstore: decode get_status response: %w", err)
 	}
-	if payload == nil {
+	if statusPayload == nil {
 		return nil, nil
 	}
-	return payload, nil
+	return statusPayload, nil
 }
 
-func (b *httpBackend) HGet(ctx context.Context, hashKey, field string) ([]byte, error) {
+func (b *httpBackend) HGet(ctx context.Context, hashKey, field string) (data []byte, err error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("cstore: http backend not configured")
 	}
@@ -416,7 +416,7 @@ func (b *httpBackend) HGet(ctx context.Context, hashKey, field string) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	data, err := httpx.ReadAllAndClose(resp.Body)
+	data, err = httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +477,7 @@ func (b *httpBackend) HSet(ctx context.Context, hashKey, field string, raw []byt
 	return nil
 }
 
-func (b *httpBackend) HGetAll(ctx context.Context, hashKey string) ([]byte, error) {
+func (b *httpBackend) HGetAll(ctx context.Context, hashKey string) (data []byte, err error) {
 	if b == nil || b.client == nil {
 		return nil, fmt.Errorf("cstore: http backend not configured")
 	}
@@ -489,7 +489,7 @@ func (b *httpBackend) HGetAll(ctx context.Context, hashKey string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	data, err := httpx.ReadAllAndClose(resp.Body)
+	data, err = httpx.ReadAllAndClose(resp.Body)
 	if err != nil {
 		return nil, err
 	}
