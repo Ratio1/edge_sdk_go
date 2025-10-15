@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -54,7 +55,7 @@ func demoHTTP() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.Set(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
+	if err := cs.Set(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
 		return err
 	}
 
@@ -65,11 +66,11 @@ func demoHTTP() error {
 	fmt.Println("cstore get:", itemValue)
 
 	data := []byte("hello http")
-	stat, err := fs.AddFileBase64(ctx, "/docs/http.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	cid, err := fs.AddFileBase64(ctx, bytes.NewReader(data), &r1fs.DataOptions{FilePath: "/docs/http.txt"})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("r1fs add_file_base64: cid=%s size=%d\n", stat.Path, stat.Size)
+	fmt.Printf("r1fs add_file_base64: cid=%s size=%d\n", cid, len(data))
 
 	return nil
 }
@@ -92,7 +93,7 @@ func demoAuto() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.HSet(ctx, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
+	if err := cs.HSet(ctx, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
 		return err
 	}
 	var hItemValue map[string]int
@@ -101,7 +102,7 @@ func demoAuto() error {
 	}
 	fmt.Println("cstore hget:", hItemValue)
 
-	cid, err := fs.AddYAML(ctx, map[string]string{"env": "auto"}, &r1fs.YAMLOptions{Filename: "env.yaml"})
+	cid, err := fs.AddYAML(ctx, map[string]string{"env": "auto"}, &r1fs.DataOptions{Filename: "env.yaml"})
 	if err != nil {
 		return err
 	}
@@ -127,7 +128,7 @@ func demoMock() error {
 	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
-	if _, err := cs.Set(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
+	if err := cs.Set(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
 		return err
 	}
 	status, err := cs.GetStatus(ctx)
@@ -145,11 +146,11 @@ func demoMock() error {
 	}
 
 	content := []byte("mock payload")
-	stat, err := fs.AddFile(ctx, "mock.bin", bytes.NewReader(content), int64(len(content)), nil)
+	cid, err := fs.AddFile(ctx, bytes.NewReader(content), &r1fs.DataOptions{Filename: "mock.bin"})
 	if err != nil {
 		return err
 	}
-	loc, err := fs.GetFile(ctx, stat.Path, "")
+	loc, err := fs.GetFile(ctx, cid, "")
 	if err != nil {
 		return err
 	}
@@ -193,15 +194,15 @@ func bootstrapFromEnv() (*cstore.Client, *r1fs.Client, string, error) {
 
 func newSandboxServer() *httptest.Server {
 	type fileRecord struct {
-		Data        []byte
-		Filename    string
-		Secret      string
-		Metadata    map[string]string
-		ContentType string
+		Data   []byte
+		Name   string
+		Secret string
+		Nonce  *int
 	}
 	type yamlRecord struct {
 		Data   json.RawMessage
 		Secret string
+		Nonce  *int
 	}
 
 	var (
@@ -337,11 +338,11 @@ func newSandboxServer() *httptest.Server {
 
 		case "/add_file_base64":
 			var req struct {
-				FileBase64  string            `json:"file_base64_str"`
-				Filename    string            `json:"filename"`
-				Secret      string            `json:"secret"`
-				Metadata    map[string]string `json:"metadata"`
-				ContentType string            `json:"content_type"`
+				FileBase64 string `json:"file_base64_str"`
+				Filename   string `json:"filename"`
+				FilePath   string `json:"file_path"`
+				Secret     string `json:"secret"`
+				Nonce      *int   `json:"nonce"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -356,23 +357,20 @@ func newSandboxServer() *httptest.Server {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			filename := strings.TrimSpace(req.Filename)
-			if filename == "" {
-				filename = fmt.Sprintf("file-%d.bin", len(files)+1)
+			name := strings.TrimSpace(req.Filename)
+			if name == "" {
+				name = strings.TrimSpace(req.FilePath)
+			}
+			if name == "" {
+				http.Error(w, "filename is required", http.StatusBadRequest)
+				return
 			}
 			cid := newCID()
 			rec := fileRecord{
-				Data:        data,
-				Filename:    filename,
-				Secret:      strings.TrimSpace(req.Secret),
-				Metadata:    nil,
-				ContentType: strings.TrimSpace(req.ContentType),
-			}
-			if len(req.Metadata) > 0 {
-				rec.Metadata = make(map[string]string, len(req.Metadata))
-				for k, v := range req.Metadata {
-					rec.Metadata[k] = v
-				}
+				Data:   data,
+				Name:   name,
+				Secret: strings.TrimSpace(req.Secret),
+				Nonce:  req.Nonce,
 			}
 			mu.Lock()
 			files[cid] = rec
@@ -401,7 +399,7 @@ func newSandboxServer() *httptest.Server {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"file_base64_str": base64.StdEncoding.EncodeToString(rec.Data),
-				"filename":        rec.Filename,
+				"filename":        rec.Name,
 			})
 
 		case "/add_file":
@@ -420,33 +418,36 @@ func newSandboxServer() *httptest.Server {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			metaRaw := strings.TrimSpace(r.FormValue("body_json"))
-			rec := fileRecord{Data: data, Filename: header.Filename}
-			if metaRaw != "" {
+			name := strings.TrimSpace(header.Filename)
+			secret := ""
+			var nonce *int
+			if metaRaw := strings.TrimSpace(r.FormValue("body_json")); metaRaw != "" {
 				var meta map[string]any
 				if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
 					http.Error(w, fmt.Sprintf("invalid body_json: %v", err), http.StatusBadRequest)
 					return
 				}
-				if secret, ok := meta["secret"].(string); ok {
-					rec.Secret = secret
+				if fn, ok := meta["fn"].(string); ok && strings.TrimSpace(fn) != "" {
+					name = fn
 				}
-				if metadata, ok := meta["metadata"].(map[string]any); ok {
-					rec.Metadata = map[string]string{}
-					for k, v := range metadata {
-						if str, ok := v.(string); ok {
-							rec.Metadata[k] = str
-						}
+				if fp, ok := meta["file_path"].(string); ok && strings.TrimSpace(fp) != "" {
+					name = fp
+				}
+				if s, ok := meta["secret"].(string); ok {
+					secret = strings.TrimSpace(s)
+				}
+				if rawNonce, ok := meta["nonce"]; ok {
+					if ptr := toIntPointer(rawNonce); ptr != nil {
+						nonce = ptr
 					}
 				}
-				if ct, ok := meta["content_type"].(string); ok {
-					rec.ContentType = ct
-				}
 			}
-			if strings.TrimSpace(rec.ContentType) == "" {
-				rec.ContentType = http.DetectContentType(data)
+			if name == "" {
+				http.Error(w, "filename is required", http.StatusBadRequest)
+				return
 			}
 			cid := newCID()
+			rec := fileRecord{Data: data, Name: name, Secret: secret, Nonce: nonce}
 			mu.Lock()
 			files[cid] = rec
 			mu.Unlock()
@@ -465,17 +466,7 @@ func newSandboxServer() *httptest.Server {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
-			meta := map[string]any{}
-			if rec.Filename != "" {
-				meta["filename"] = rec.Filename
-			}
-			if len(rec.Metadata) > 0 {
-				inner := make(map[string]string, len(rec.Metadata))
-				for k, v := range rec.Metadata {
-					inner[k] = v
-				}
-				meta["metadata"] = inner
-			}
+			meta := map[string]any{"filename": rec.Name}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"result": map[string]any{
@@ -489,6 +480,8 @@ func newSandboxServer() *httptest.Server {
 				Data     json.RawMessage `json:"data"`
 				Filename string          `json:"fn"`
 				Secret   string          `json:"secret"`
+				FilePath string          `json:"file_path"`
+				Nonce    *int            `json:"nonce"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -499,7 +492,11 @@ func newSandboxServer() *httptest.Server {
 				return
 			}
 			cid := newCID()
-			rec := yamlRecord{Data: append([]byte(nil), bytes.TrimSpace(req.Data)...), Secret: strings.TrimSpace(req.Secret)}
+			rec := yamlRecord{
+				Data:   append([]byte(nil), bytes.TrimSpace(req.Data)...),
+				Secret: strings.TrimSpace(req.Secret),
+				Nonce:  req.Nonce,
+			}
 			mu.Lock()
 			yamlDocs[cid] = rec
 			mu.Unlock()
@@ -542,4 +539,36 @@ func mapsKeys(m map[string]json.RawMessage) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func toIntPointer(value any) *int {
+	switch v := value.(type) {
+	case float64:
+		i := int(v)
+		return &i
+	case float32:
+		i := int(v)
+		return &i
+	case int:
+		i := v
+		return &i
+	case int64:
+		i := int(v)
+		return &i
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			i := int(parsed)
+			return &i
+		}
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return nil
+		}
+		if parsed, err := strconv.Atoi(s); err == nil {
+			i := parsed
+			return &i
+		}
+	}
+	return nil
 }

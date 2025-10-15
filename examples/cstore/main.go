@@ -27,7 +27,7 @@ func main() {
 	ctx := context.Background()
 
 	fmt.Println("== Put/Get ==")
-	if _, err := client.Set(ctx, "jobs:1", counter{Count: 1}, nil); err != nil {
+	if err := client.Set(ctx, "jobs:1", counter{Count: 1}, nil); err != nil {
 		panic(err)
 	}
 	var itemValue counter
@@ -46,7 +46,7 @@ func main() {
 	}
 
 	fmt.Println("\n== Hash operations (HSet/HGet/HGetAll) ==")
-	if _, err := client.HSet(ctx, "h:jobs", "1", map[string]string{"status": "queued"}, nil); err != nil {
+	if err := client.HSet(ctx, "h:jobs", "1", map[string]string{"status": "queued"}, nil); err != nil {
 		panic(err)
 	}
 	var hValue map[string]string
@@ -54,7 +54,7 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("field 1 ->", hValue)
-	if _, err := client.HSet(ctx, "h:jobs", "2", map[string]string{"status": "running"}, nil); err != nil {
+	if err := client.HSet(ctx, "h:jobs", "2", map[string]string{"status": "running"}, nil); err != nil {
 		panic(err)
 	}
 	hItems, err := client.HGetAll(ctx, "h:jobs")
