@@ -84,7 +84,7 @@ go run ./cmd/ratio1-sandbox --cstore-addr :8787 --r1fs-addr :8788
 - `--latency 200ms` – inject fixed latency before every request.
 - `--fail rate=0.05,code=500` – randomly inject HTTP failures.
 
-The sandbox now starts separate listeners for CStore and R1FS. The banner prints two `export` lines – set `EE_CHAINSTORE_API_URL` to the CStore address and `EE_R1FS_API_URL` to the R1FS address. Both surfaces expose the endpoints exercised by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/add_json`, `/add_pickle`, `/calculate_json_cid`, `/calculate_pickle_cid`, `/get_status_r1fs`).
+The sandbox now starts separate listeners for CStore and R1FS. The banner prints two `export` lines – set `EE_CHAINSTORE_API_URL` to the CStore address and `EE_R1FS_API_URL` to the R1FS address. Both surfaces expose the endpoints exercised by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/add_json`, `/add_pickle`, `/calculate_json_cid`, `/calculate_pickle_cid`, `/get_status`).
 
 ## Usage snippets
 

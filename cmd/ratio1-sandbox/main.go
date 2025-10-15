@@ -148,7 +148,7 @@ func main() {
 	r1fsMux.HandleFunc("/get_yaml", wrap(func(w http.ResponseWriter, r *http.Request) {
 		handleR1FSGetYAML(w, r, fsMock)
 	}))
-	r1fsMux.HandleFunc("/get_status_r1fs", wrap(func(w http.ResponseWriter, r *http.Request) {
+	r1fsMux.HandleFunc("/get_status", wrap(func(w http.ResponseWriter, r *http.Request) {
 		handleR1FSStatus(w, r, fsMock)
 	}))
 
