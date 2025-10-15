@@ -18,6 +18,12 @@ When the official APIs lack features (TTL headers, directory listings, deletes),
 go get github.com/Ratio1/ratio1_sdk_go
 ```
 
+or for new features in development
+
+```bash
+go get github.com/Ratio1/ratio1_sdk_go@develop
+```
+
 ## Environment variables
 
 | Variable | Meaning |
