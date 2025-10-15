@@ -58,7 +58,7 @@ Each tagged release includes pre-built archives named `ratio1-sandbox_<os>_<arch
 curl -L https://github.com/Ratio1/ratio1_sdk_go/releases/latest/download/ratio1-sandbox_darwin_arm64.tar.gz \
   | tar -xz
 chmod +x ratio1-sandbox
-./ratio1-sandbox --addr :8787
+./ratio1-sandbox --cstore-addr :8787 --r1fs-addr :8788
 ```
 
 Windows users can download `ratio1-sandbox_windows_amd64.zip`, unzip it, and run `ratio1-sandbox.exe`.
@@ -74,7 +74,7 @@ go run ./examples/runtime_modes
 If you prefer to rebuild locally:
 
 ```bash
-go run ./cmd/ratio1-sandbox --addr :8787
+go run ./cmd/ratio1-sandbox --cstore-addr :8787 --r1fs-addr :8788
 ```
 
 #### Flags and behaviours
@@ -84,7 +84,7 @@ go run ./cmd/ratio1-sandbox --addr :8787
 - `--latency 200ms` – inject fixed latency before every request.
 - `--fail rate=0.05,code=500` – randomly inject HTTP failures.
 
-The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/get_status_r1fs`). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
+The sandbox now starts separate listeners for CStore and R1FS. The banner prints two `export` lines – set `EE_CHAINSTORE_API_URL` to the CStore address and `EE_R1FS_API_URL` to the R1FS address. Both surfaces expose the endpoints exercised by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/add_json`, `/add_pickle`, `/calculate_json_cid`, `/calculate_pickle_cid`, `/get_status_r1fs`).
 
 ## Usage snippets
 
@@ -154,23 +154,23 @@ func main() {
 
 	// File primitives
 	data := []byte(`{"ok":true}`)
-    base64CID, err := fs.AddFileBase64(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
-    if err != nil {
-        log.Fatalf("r1fs upload: %v", err)
-    }
-    fmt.Printf("uploaded CID: %s\n", base64CID)
+	base64CID, err := fs.AddFileBase64(ctx, bytes.NewReader(data), &r1fs.DataOptions{FilePath: "/outputs/result.json"})
+	if err != nil {
+		log.Fatalf("r1fs upload: %v", err)
+	}
+	fmt.Printf("uploaded CID: %s\n", base64CID)
 
-    fileCID, err := fs.AddFile(ctx, "artifact.bin", bytes.NewReader([]byte{0xde, 0xad}), 2, nil)
-    if err != nil {
-        log.Fatalf("r1fs add_file: %v", err)
-    }
-    loc, err := fs.GetFile(ctx, fileCID, "")
+	fileCID, err := fs.AddFile(ctx, bytes.NewReader([]byte{0xde, 0xad}), &r1fs.DataOptions{Filename: "artifact.bin"})
+	if err != nil {
+		log.Fatalf("r1fs add_file: %v", err)
+	}
+	loc, err := fs.GetFile(ctx, fileCID, "")
 	if err != nil {
 		log.Fatalf("r1fs get_file: %v", err)
 	}
 	fmt.Printf("file stored at: %s (filename=%s)\n", loc.Path, loc.Filename)
 
-	cid, err := fs.AddYAML(ctx, map[string]any{"service": "r1fs", "enabled": true}, &r1fs.YAMLOptions{Filename: "config.yaml"})
+	cid, err := fs.AddYAML(ctx, map[string]any{"service": "r1fs", "enabled": true}, &r1fs.DataOptions{Filename: "config.yaml"})
 	if err != nil {
 		log.Fatalf("r1fs add_yaml: %v", err)
 	}
@@ -179,6 +179,12 @@ func main() {
 		log.Fatalf("r1fs get_yaml: %v", err)
 	}
 	fmt.Println("yaml document:", yamlDoc)
+
+	calcCID, err := fs.CalculateJSONCID(ctx, map[string]any{"service": "r1fs"}, 42, nil)
+	if err != nil {
+		log.Fatalf("r1fs calculate_json_cid: %v", err)
+	}
+	fmt.Println("calculated cid:", calcCID)
 }
 ```
 

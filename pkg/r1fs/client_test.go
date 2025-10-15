@@ -31,7 +31,9 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 			var payload struct {
 				FileBase64 string `json:"file_base64_str"`
 				Filename   string `json:"filename"`
+				FilePath   string `json:"file_path"`
 				Secret     string `json:"secret"`
+				Nonce      *int   `json:"nonce"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
@@ -43,9 +45,17 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 				return
 			}
 
+			name := payload.Filename
+			if strings.TrimSpace(name) == "" {
+				name = payload.FilePath
+			}
+			if strings.TrimSpace(name) == "" {
+				http.Error(w, "filename required", http.StatusBadRequest)
+				return
+			}
 			mu.Lock()
 			nextID++
-			cid := "CID-" + payload.Filename
+			cid := "CID-" + name
 			data[cid] = raw
 			mu.Unlock()
 
@@ -95,12 +105,26 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			_ = r.FormValue("body_json")
+			filename := header.Filename
+			metaRaw := r.FormValue("body_json")
+			if strings.TrimSpace(metaRaw) != "" {
+				var meta map[string]any
+				if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				if fn, ok := meta["fn"].(string); ok && strings.TrimSpace(fn) != "" {
+					filename = fn
+				}
+				if fp, ok := meta["file_path"].(string); ok && strings.TrimSpace(fp) != "" {
+					filename = fp
+				}
+			}
 			mu.Lock()
 			nextID++
 			cid := fmt.Sprintf("CID-file-%d", nextID)
 			data[cid] = payload
-			fileNames[cid] = header.Filename
+			fileNames[cid] = filename
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
@@ -108,6 +132,122 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 					"message": "ok",
 					"cid":     cid,
 				},
+			})
+
+		case "/add_json":
+			defer r.Body.Close()
+			var payload struct {
+				Data     json.RawMessage `json:"data"`
+				Fn       string          `json:"fn"`
+				FilePath string          `json:"file_path"`
+				Secret   string          `json:"secret"`
+				Nonce    *int            `json:"nonce"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(payload.Data) == 0 {
+				http.Error(w, "missing data", http.StatusBadRequest)
+				return
+			}
+			filename := payload.Fn
+			if strings.TrimSpace(filename) == "" {
+				filename = payload.FilePath
+			}
+			if strings.TrimSpace(filename) == "" {
+				filename = "data.json"
+			}
+			mu.Lock()
+			nextID++
+			cid := fmt.Sprintf("CID-json-%d", nextID)
+			data[cid] = append([]byte(nil), payload.Data...)
+			fileNames[cid] = filename
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{"cid": cid},
+			})
+
+		case "/add_pickle":
+			defer r.Body.Close()
+			var payload struct {
+				Data     json.RawMessage `json:"data"`
+				Fn       string          `json:"fn"`
+				FilePath string          `json:"file_path"`
+				Secret   string          `json:"secret"`
+				Nonce    *int            `json:"nonce"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(payload.Data) == 0 {
+				http.Error(w, "missing data", http.StatusBadRequest)
+				return
+			}
+			filename := payload.Fn
+			if strings.TrimSpace(filename) == "" {
+				filename = payload.FilePath
+			}
+			if strings.TrimSpace(filename) == "" {
+				filename = "data.pkl"
+			}
+			mu.Lock()
+			nextID++
+			cid := fmt.Sprintf("CID-pickle-%d", nextID)
+			data[cid] = append([]byte(nil), payload.Data...)
+			fileNames[cid] = filename
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{"cid": cid},
+			})
+
+		case "/calculate_json_cid":
+			defer r.Body.Close()
+			var payload struct {
+				Data     json.RawMessage `json:"data"`
+				Fn       string          `json:"fn"`
+				FilePath string          `json:"file_path"`
+				Secret   string          `json:"secret"`
+				Nonce    int             `json:"nonce"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if payload.Nonce == 0 {
+				http.Error(w, "nonce required", http.StatusBadRequest)
+				return
+			}
+			cid := fmt.Sprintf("CID-json-calc-%d", payload.Nonce)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{"cid": cid},
+			})
+
+		case "/calculate_pickle_cid":
+			defer r.Body.Close()
+			var payload struct {
+				Data     json.RawMessage `json:"data"`
+				Fn       string          `json:"fn"`
+				FilePath string          `json:"file_path"`
+				Secret   string          `json:"secret"`
+				Nonce    int             `json:"nonce"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if payload.Nonce == 0 {
+				http.Error(w, "nonce required", http.StatusBadRequest)
+				return
+			}
+			cid := fmt.Sprintf("CID-pickle-calc-%d", payload.Nonce)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{"cid": cid},
 			})
 
 		case "/get_file":
@@ -192,7 +332,7 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 
 	ctx := context.Background()
 	payload := strings.NewReader("hello world")
-	cid, err := client.AddFileBase64(ctx, "/tmp/hello.txt", payload, int64(payload.Len()), &r1fs.UploadOptions{ContentType: "text/plain"})
+	cid, err := client.AddFileBase64(ctx, payload, &r1fs.DataOptions{FilePath: "/tmp/hello.txt"})
 	if err != nil {
 		t.Fatalf("AddFileBase64: %v", err)
 	}
@@ -212,7 +352,7 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 	}
 
 	streamPayload := strings.NewReader("stream upload")
-	streamCID, err := client.AddFile(ctx, "stream.txt", streamPayload, int64(streamPayload.Len()), &r1fs.UploadOptions{Secret: "s3"})
+	streamCID, err := client.AddFile(ctx, streamPayload, &r1fs.DataOptions{Filename: "stream.txt", Secret: "s3"})
 	if err != nil {
 		t.Fatalf("AddFile: %v", err)
 	}
@@ -226,9 +366,51 @@ func TestAddFileBase64AndGetFileBase64(t *testing.T) {
 	if loc == nil || loc.Filename != "stream.txt" || loc.Path == "" {
 		t.Fatalf("unexpected file location: %#v", loc)
 	}
+	overridePayload := strings.NewReader("override")
+	overrideCID, err := client.AddFile(ctx, overridePayload, &r1fs.DataOptions{Filename: "remote.bin"})
+	if err != nil {
+		t.Fatalf("AddFile with override: %v", err)
+	}
+	overrideLoc, err := client.GetFile(ctx, overrideCID, "")
+	if err != nil {
+		t.Fatalf("GetFile override: %v", err)
+	}
+	if overrideLoc.Filename != "remote.bin" {
+		t.Fatalf("expected overridden filename, got %#v", overrideLoc)
+	}
+	jsonOptsNonce := 7
+	jsonCID, err := client.AddJSON(ctx, map[string]any{"name": "ratio1"}, &r1fs.DataOptions{Filename: "doc.json", Secret: "sec", Nonce: &jsonOptsNonce})
+	if err != nil {
+		t.Fatalf("AddJSON: %v", err)
+	}
+	if strings.TrimSpace(jsonCID) == "" {
+		t.Fatalf("AddJSON returned empty cid")
+	}
+	pickleNonce := 13
+	pickleCID, err := client.AddPickle(ctx, map[string]int{"v": 1}, &r1fs.DataOptions{Nonce: &pickleNonce})
+	if err != nil {
+		t.Fatalf("AddPickle: %v", err)
+	}
+	if strings.TrimSpace(pickleCID) == "" {
+		t.Fatalf("AddPickle returned empty cid")
+	}
+	calcJSONCID, err := client.CalculateJSONCID(ctx, map[string]string{"kind": "json"}, 42, &r1fs.DataOptions{Secret: "sec"})
+	if err != nil {
+		t.Fatalf("CalculateJSONCID: %v", err)
+	}
+	if calcJSONCID != "CID-json-calc-42" {
+		t.Fatalf("unexpected JSON cid: %s", calcJSONCID)
+	}
+	calcPickleCID, err := client.CalculatePickleCID(ctx, map[string]string{"kind": "pickle"}, 56, nil)
+	if err != nil {
+		t.Fatalf("CalculatePickleCID: %v", err)
+	}
+	if calcPickleCID != "CID-pickle-calc-56" {
+		t.Fatalf("unexpected pickle cid: %s", calcPickleCID)
+	}
 
 	yamlPayload := map[string]any{"name": "ratio1", "count": 2}
-	yamlCID, err := client.AddYAML(ctx, yamlPayload, &r1fs.YAMLOptions{Filename: "config.yaml"})
+	yamlCID, err := client.AddYAML(ctx, yamlPayload, &r1fs.DataOptions{Filename: "config.yaml"})
 	if err != nil {
 		t.Fatalf("AddYAML: %v", err)
 	}

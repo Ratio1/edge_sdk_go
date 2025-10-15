@@ -58,7 +58,7 @@ func TestNewFromEnvMockFallback(t *testing.T) {
 	}
 
 	payload := strings.NewReader("hello")
-	cid, err := client.AddFileBase64(context.Background(), "hello.txt", payload, int64(payload.Len()), nil)
+	cid, err := client.AddFileBase64(context.Background(), payload, &r1fs.DataOptions{Filename: "hello.txt"})
 	if err != nil {
 		t.Fatalf("AddFileBase64: %v", err)
 	}

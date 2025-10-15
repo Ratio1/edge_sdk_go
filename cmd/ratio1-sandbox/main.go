@@ -56,7 +56,8 @@ func (lrw *loggingResponseWriter) Flush() {
 }
 
 func main() {
-	addr := flag.String("addr", ":8787", "listen address")
+	cstoreAddr := flag.String("cstore-addr", ":8787", "listen address for cstore API")
+	r1fsAddr := flag.String("r1fs-addr", ":8788", "listen address for r1fs API")
 	kvSeed := flag.String("kv-seed", "", "path to JSON seed for cstore mock")
 	fsSeed := flag.String("fs-seed", "", "path to JSON seed for r1fs mock")
 	latency := flag.Duration("latency", 0, "artificial latency to inject per request")
@@ -92,65 +93,84 @@ func main() {
 		log.Fatalf("parse fail flag: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/get_status", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleCStoreStatus(w, r, csMock)
-	})))
-	mux.HandleFunc("/set", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleCStoreSet(w, r, csMock)
-	})))
-	mux.HandleFunc("/get", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleCStoreGet(w, r, csMock)
-	})))
-	mux.HandleFunc("/hset", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleCStoreHSet(w, r, csMock)
-	})))
-	mux.HandleFunc("/hget", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleCStoreHGet(w, r, csMock)
-	})))
-	mux.HandleFunc("/hgetall", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleCStoreHGetAll(w, r, csMock)
-	})))
-	mux.HandleFunc("/add_file_base64", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSAddFileBase64(w, r, fsMock)
-	})))
-	mux.HandleFunc("/add_file", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSAddFile(w, r, fsMock)
-	})))
-	mux.HandleFunc("/get_file_base64", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSGetFileBase64(w, r, fsMock)
-	})))
-	mux.HandleFunc("/get_file", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSGetFile(w, r, fsMock)
-	})))
-	mux.HandleFunc("/add_yaml", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSAddYAML(w, r, fsMock)
-	})))
-	mux.HandleFunc("/get_yaml", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSGetYAML(w, r, fsMock)
-	})))
-	mux.HandleFunc("/get_status_r1fs", loggingMiddleware(withMiddleware(*latency, failCfg, func(w http.ResponseWriter, r *http.Request) {
-		handleR1FSStatus(w, r, fsMock)
-	})))
-
-	server := &http.Server{
-		Addr:    *addr,
-		Handler: mux,
+	wrap := func(next http.HandlerFunc) http.HandlerFunc {
+		return loggingMiddleware(withMiddleware(*latency, failCfg, next))
 	}
 
-	log.Printf("ratio1-sandbox listening on %s", *addr)
+	cstoreMux := http.NewServeMux()
+	cstoreMux.HandleFunc("/get_status", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleCStoreStatus(w, r, csMock)
+	}))
+	cstoreMux.HandleFunc("/set", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleCStoreSet(w, r, csMock)
+	}))
+	cstoreMux.HandleFunc("/get", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleCStoreGet(w, r, csMock)
+	}))
+	cstoreMux.HandleFunc("/hset", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleCStoreHSet(w, r, csMock)
+	}))
+	cstoreMux.HandleFunc("/hget", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleCStoreHGet(w, r, csMock)
+	}))
+	cstoreMux.HandleFunc("/hgetall", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleCStoreHGetAll(w, r, csMock)
+	}))
+
+	r1fsMux := http.NewServeMux()
+	r1fsMux.HandleFunc("/add_file_base64", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSAddFileBase64(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/add_file", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSAddFile(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/get_file_base64", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSGetFileBase64(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/get_file", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSGetFile(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/add_yaml", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSAddYAML(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/add_json", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSAddJSON(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/add_pickle", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSAddPickle(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/calculate_json_cid", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSCalculateJSONCID(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/calculate_pickle_cid", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSCalculatePickleCID(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/get_yaml", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSGetYAML(w, r, fsMock)
+	}))
+	r1fsMux.HandleFunc("/get_status_r1fs", wrap(func(w http.ResponseWriter, r *http.Request) {
+		handleR1FSStatus(w, r, fsMock)
+	}))
+
+	cstoreServer := &http.Server{Addr: *cstoreAddr, Handler: cstoreMux}
+	r1fsServer := &http.Server{Addr: *r1fsAddr, Handler: r1fsMux}
+
+	go func() {
+		if err := cstoreServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("cstore server failed: %v", err)
+		}
+	}()
+
+	log.Printf("ratio1-sandbox cstore listening on %s", *cstoreAddr)
+	log.Printf("ratio1-sandbox r1fs listening on %s", *r1fsAddr)
 	fmt.Println()
 	fmt.Println("export R1_RUNTIME_MODE=http")
-	host := *addr
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-	fmt.Printf("export %s=http://%s\n", cstoreURLEnv, host)
-	fmt.Printf("export %s=http://%s\n", r1fsURLEnv, host)
+	fmt.Printf("export %s=http://%s\n", cstoreURLEnv, hostFromAddr(*cstoreAddr))
+	fmt.Printf("export %s=http://%s\n", r1fsURLEnv, hostFromAddr(*r1fsAddr))
 	fmt.Println()
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server failed: %v", err)
+	if err := r1fsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("r1fs server failed: %v", err)
 	}
 }
 
@@ -351,7 +371,9 @@ func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 	var payload struct {
 		Base64   string `json:"file_base64_str"`
 		Filename string `json:"filename"`
+		FilePath string `json:"file_path"`
 		Secret   string `json:"secret"`
+		Nonce    *int   `json:"nonce"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
@@ -366,15 +388,18 @@ func handleR1FSAddFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 		writeError(w, http.StatusBadRequest, "invalid base64 payload", err)
 		return
 	}
-	filename := payload.Filename
-	if filename == "" {
-		filename = fmt.Sprintf("file-%d.bin", time.Now().UnixNano())
+	if strings.TrimSpace(payload.Filename) == "" && strings.TrimSpace(payload.FilePath) == "" {
+		writeError(w, http.StatusBadRequest, "filename or file_path is required", nil)
+		return
 	}
-	opts := &r1fs.UploadOptions{ContentType: http.DetectContentType(data)}
+	opts := &r1fs.DataOptions{Filename: strings.TrimSpace(payload.Filename), FilePath: strings.TrimSpace(payload.FilePath)}
 	if strings.TrimSpace(payload.Secret) != "" {
 		opts.Secret = payload.Secret
 	}
-	cid, err := fs.AddFileBase64(r.Context(), filename, bytes.NewReader(data), int64(len(data)), opts)
+	if payload.Nonce != nil {
+		opts.Nonce = payload.Nonce
+	}
+	cid, err := fs.AddFileBase64(r.Context(), bytes.NewReader(data), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "r1fs add_file_base64 failed", err)
 		return
@@ -413,7 +438,11 @@ func handleR1FSGetFileBase64(w http.ResponseWriter, r *http.Request, fs *r1fsmoc
 }
 
 func handleR1FSStatus(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
-	writeError(w, http.StatusNotImplemented, "r1fs list not supported", nil)
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	writeResult(w, fs.Status())
 }
 
 func handleR1FSAddFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
@@ -437,7 +466,10 @@ func handleR1FSAddFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock
 		return
 	}
 	metaRaw := r.FormValue("body_json")
-	opts := &r1fs.UploadOptions{}
+	opts := &r1fs.DataOptions{}
+	if name := strings.TrimSpace(header.Filename); name != "" {
+		opts.Filename = name
+	}
 	if strings.TrimSpace(metaRaw) != "" {
 		var meta map[string]any
 		if err := json.Unmarshal([]byte(metaRaw), &meta); err != nil {
@@ -447,22 +479,24 @@ func handleR1FSAddFile(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock
 		if secret, ok := meta["secret"].(string); ok {
 			opts.Secret = secret
 		}
-		if ct, ok := meta["content_type"].(string); ok {
-			opts.ContentType = ct
-		}
-		if md, ok := meta["metadata"].(map[string]any); ok {
-			opts.Metadata = map[string]string{}
-			for k, v := range md {
-				if str, ok := v.(string); ok {
-					opts.Metadata[k] = str
-				}
+		if nonce, ok := meta["nonce"]; ok {
+			if value, ok := coerceToInt(nonce); ok {
+				tmp := value
+				opts.Nonce = &tmp
 			}
 		}
+		if fp, ok := meta["file_path"].(string); ok && strings.TrimSpace(fp) != "" {
+			opts.FilePath = fp
+		}
+		if fn, ok := meta["fn"].(string); ok && strings.TrimSpace(fn) != "" {
+			opts.Filename = fn
+		}
 	}
-	if strings.TrimSpace(opts.ContentType) == "" {
-		opts.ContentType = http.DetectContentType(data)
+	if strings.TrimSpace(opts.Filename) == "" && strings.TrimSpace(opts.FilePath) == "" {
+		writeError(w, http.StatusBadRequest, "filename or file_path is required", nil)
+		return
 	}
-	cid, err := fs.AddFile(r.Context(), header.Filename, data, int64(len(data)), opts)
+	cid, err := fs.AddFile(r.Context(), bytes.NewReader(data), opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "r1fs add_file failed", err)
 		return
@@ -500,6 +534,42 @@ func handleR1FSAddYAML(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock
 	var payload struct {
 		Data     json.RawMessage `json:"data"`
 		Filename string          `json:"fn"`
+		FilePath string          `json:"file_path"`
+		Secret   string          `json:"secret"`
+		Nonce    *int            `json:"nonce"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
+		return
+	}
+	if len(bytes.TrimSpace(payload.Data)) == 0 {
+		writeError(w, http.StatusBadRequest, "data is required", nil)
+		return
+	}
+	var value any
+	if err := json.Unmarshal(payload.Data, &value); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid data payload", err)
+		return
+	}
+	ops := &r1fs.DataOptions{Filename: payload.Filename, FilePath: payload.FilePath, Secret: payload.Secret, Nonce: payload.Nonce}
+	cid, err := fs.AddYAML(r.Context(), value, ops)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "r1fs add_yaml failed", err)
+		return
+	}
+	writeResult(w, map[string]any{"cid": cid})
+}
+
+func handleR1FSAddJSON(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	var payload struct {
+		Data     json.RawMessage `json:"data"`
+		Fn       string          `json:"fn"`
+		FilePath string          `json:"file_path"`
+		Nonce    *int            `json:"nonce"`
 		Secret   string          `json:"secret"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -515,9 +585,116 @@ func handleR1FSAddYAML(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock
 		writeError(w, http.StatusBadRequest, "invalid data payload", err)
 		return
 	}
-	cid, err := fs.AddYAML(r.Context(), value, payload.Filename, payload.Secret)
+	opts := &r1fs.DataOptions{Filename: payload.Fn, FilePath: payload.FilePath, Secret: payload.Secret, Nonce: payload.Nonce}
+	cid, err := fs.AddJSON(r.Context(), value, opts)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "r1fs add_yaml failed", err)
+		writeError(w, http.StatusInternalServerError, "r1fs add_json failed", err)
+		return
+	}
+	writeResult(w, map[string]any{"cid": cid})
+}
+
+func handleR1FSAddPickle(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	var payload struct {
+		Data     json.RawMessage `json:"data"`
+		Fn       string          `json:"fn"`
+		FilePath string          `json:"file_path"`
+		Nonce    *int            `json:"nonce"`
+		Secret   string          `json:"secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
+		return
+	}
+	if len(bytes.TrimSpace(payload.Data)) == 0 {
+		writeError(w, http.StatusBadRequest, "data is required", nil)
+		return
+	}
+	var value any
+	if err := json.Unmarshal(payload.Data, &value); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid data payload", err)
+		return
+	}
+	opts := &r1fs.DataOptions{Filename: payload.Fn, FilePath: payload.FilePath, Secret: payload.Secret, Nonce: payload.Nonce}
+	cid, err := fs.AddPickle(r.Context(), value, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "r1fs add_pickle failed", err)
+		return
+	}
+	writeResult(w, map[string]any{"cid": cid})
+}
+
+func handleR1FSCalculateJSONCID(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	var payload struct {
+		Data     json.RawMessage `json:"data"`
+		Fn       string          `json:"fn"`
+		FilePath string          `json:"file_path"`
+		Secret   string          `json:"secret"`
+		Nonce    int             `json:"nonce"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
+		return
+	}
+	if payload.Nonce == 0 {
+		writeError(w, http.StatusBadRequest, "nonce is required", nil)
+		return
+	}
+	var value any
+	if len(payload.Data) > 0 {
+		if err := json.Unmarshal(payload.Data, &value); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid data payload", err)
+			return
+		}
+	}
+	opts := &r1fs.DataOptions{Filename: payload.Fn, FilePath: payload.FilePath, Secret: payload.Secret}
+	cid, err := fs.CalculateJSONCID(r.Context(), value, payload.Nonce, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "r1fs calculate_json_cid failed", err)
+		return
+	}
+	writeResult(w, map[string]any{"cid": cid})
+}
+
+func handleR1FSCalculatePickleCID(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed", nil)
+		return
+	}
+	var payload struct {
+		Data     json.RawMessage `json:"data"`
+		Fn       string          `json:"fn"`
+		FilePath string          `json:"file_path"`
+		Secret   string          `json:"secret"`
+		Nonce    int             `json:"nonce"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON payload", err)
+		return
+	}
+	if payload.Nonce == 0 {
+		writeError(w, http.StatusBadRequest, "nonce is required", nil)
+		return
+	}
+	var value any
+	if len(payload.Data) > 0 {
+		if err := json.Unmarshal(payload.Data, &value); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid data payload", err)
+			return
+		}
+	}
+	opts := &r1fs.DataOptions{Filename: payload.Fn, FilePath: payload.FilePath, Secret: payload.Secret}
+	cid, err := fs.CalculatePickleCID(r.Context(), value, payload.Nonce, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "r1fs calculate_pickle_cid failed", err)
 		return
 	}
 	writeResult(w, map[string]any{"cid": cid})
@@ -549,6 +726,39 @@ func handleR1FSGetYAML(w http.ResponseWriter, r *http.Request, fs *r1fsmock.Mock
 		return
 	}
 	writeResult(w, payload)
+}
+
+func coerceToInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			return int(parsed), true
+		}
+	case string:
+		if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func hostFromAddr(addr string) string {
+	host := strings.TrimSpace(addr)
+	if host == "" {
+		return "localhost"
+	}
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	return host
 }
 
 func writeResult(w http.ResponseWriter, payload any) {

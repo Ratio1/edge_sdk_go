@@ -17,7 +17,7 @@ func TestMockAddFileBase64AndGetFileBase64(t *testing.T) {
 	ctx := context.Background()
 
 	data := []byte("mock-file")
-	cid, err := m.AddFileBase64(ctx, "files/a.txt", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "text/plain"})
+	cid, err := m.AddFileBase64(ctx, bytes.NewReader(data), &r1fs.DataOptions{FilePath: "files/a.txt"})
 	if err != nil {
 		t.Fatalf("AddFileBase64: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestMockAddFileAndYAML(t *testing.T) {
 	ctx := context.Background()
 
 	fileData := []byte("stream data")
-	cid, err := m.AddFile(ctx, "stream.txt", fileData, int64(len(fileData)), nil)
+	cid, err := m.AddFile(ctx, bytes.NewReader(fileData), &r1fs.DataOptions{Filename: "stream.txt"})
 	if err != nil {
 		t.Fatalf("AddFile: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestMockAddFileAndYAML(t *testing.T) {
 		t.Fatalf("unexpected file location: %#v", loc)
 	}
 
-	yamlCID, err := m.AddYAML(ctx, map[string]string{"hello": "world"}, "config.yaml", "")
+	yamlCID, err := m.AddYAML(ctx, map[string]string{"hello": "world"}, &r1fs.DataOptions{Filename: "config.yaml"})
 	if err != nil {
 		t.Fatalf("AddYAML: %v", err)
 	}
@@ -115,5 +115,47 @@ func TestMockAddFileAndYAML(t *testing.T) {
 	}
 	if string(missing) != "\"error\"" {
 		t.Fatalf("expected error response, got %s", string(missing))
+	}
+}
+
+func TestMockStructuredData(t *testing.T) {
+	m := mock.New()
+	ctx := context.Background()
+
+	jsonNonce := 9
+	jsonCID, err := m.AddJSON(ctx, map[string]string{"hello": "world"}, &r1fs.DataOptions{Filename: "data.json", Secret: "sec", Nonce: &jsonNonce})
+	if err != nil {
+		t.Fatalf("AddJSON: %v", err)
+	}
+	if jsonCID == "" {
+		t.Fatalf("AddJSON returned empty cid")
+	}
+	loc, err := m.GetFile(ctx, jsonCID, "")
+	if err != nil {
+		t.Fatalf("GetFile json: %v", err)
+	}
+	if loc.Filename != "data.json" {
+		t.Fatalf("expected overridden filename, got %#v", loc)
+	}
+	calcJSON, err := m.CalculateJSONCID(ctx, map[string]string{"hello": "world"}, 77, &r1fs.DataOptions{Secret: "sec"})
+	if err != nil {
+		t.Fatalf("CalculateJSONCID: %v", err)
+	}
+	if calcJSON == "" {
+		t.Fatalf("CalculateJSONCID returned empty cid")
+	}
+	pickleCID, err := m.AddPickle(ctx, map[string]int{"value": 1}, &r1fs.DataOptions{FilePath: "test/your/path"})
+	if err != nil {
+		t.Fatalf("AddPickle: %v", err)
+	}
+	if pickleCID == "" {
+		t.Fatalf("AddPickle returned empty cid")
+	}
+	calcPickle, err := m.CalculatePickleCID(ctx, map[string]int{"value": 1}, 33, nil)
+	if err != nil {
+		t.Fatalf("CalculatePickleCID: %v", err)
+	}
+	if calcPickle == "" {
+		t.Fatalf("CalculatePickleCID returned empty cid")
 	}
 }

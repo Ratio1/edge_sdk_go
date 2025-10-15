@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
@@ -41,10 +42,7 @@ func NewWithBackend(b Backend) *Client {
 }
 
 // AddFileBase64 writes data via /add_file_base64 and returns the upstream CID.
-func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (cid string, err error) {
-	if strings.TrimSpace(filename) == "" {
-		return "", fmt.Errorf("r1fs: filename is required")
-	}
+func (c *Client) AddFileBase64(ctx context.Context, data io.Reader, opts *DataOptions) (cid string, err error) {
 	if c == nil || c.backend == nil {
 		return "", fmt.Errorf("r1fs: client is nil")
 	}
@@ -52,14 +50,11 @@ func (c *Client) AddFileBase64(ctx context.Context, filename string, data io.Rea
 	if err != nil {
 		return "", fmt.Errorf("r1fs: read upload payload: %w", err)
 	}
-	return c.backend.AddFileBase64(ctx, filename, payload, size, opts)
+	return c.backend.AddFileBase64(ctx, payload, opts)
 }
 
 // AddFile uploads data using the /add_file endpoint (multipart form upload) and returns the upstream CID.
-func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, size int64, opts *UploadOptions) (cid string, err error) {
-	if strings.TrimSpace(filename) == "" {
-		return "", fmt.Errorf("r1fs: filename is required")
-	}
+func (c *Client) AddFile(ctx context.Context, data io.Reader, opts *DataOptions) (cid string, err error) {
 	if c == nil || c.backend == nil {
 		return "", fmt.Errorf("r1fs: client is nil")
 	}
@@ -67,7 +62,7 @@ func (c *Client) AddFile(ctx context.Context, filename string, data io.Reader, s
 	if err != nil {
 		return "", fmt.Errorf("r1fs: read upload payload: %w", err)
 	}
-	return c.backend.AddFile(ctx, filename, payload, size, opts)
+	return c.backend.AddFile(ctx, payload, opts)
 }
 
 // GetFileBase64 retrieves and decodes data via /get_file_base64, returning the upstream filename.
@@ -92,20 +87,59 @@ func (c *Client) GetFile(ctx context.Context, cid string, secret string) (locati
 	return c.backend.GetFile(ctx, cid, secret)
 }
 
-// AddYAML stores structured data as YAML via /add_yaml and returns the assigned CID.
-func (c *Client) AddYAML(ctx context.Context, data any, opts *YAMLOptions) (cid string, err error) {
+// AddJSON stores structured JSON data via /add_json and returns the upstream CID.
+func (c *Client) AddJSON(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
 	if data == nil {
 		return "", fmt.Errorf("r1fs: data is required")
 	}
 	if c == nil || c.backend == nil {
 		return "", fmt.Errorf("r1fs: client is nil")
 	}
-	var filename, secret string
-	if opts != nil {
-		filename = opts.Filename
-		secret = opts.Secret
+	return c.backend.AddJSON(ctx, data, opts)
+}
+
+// AddPickle serialises data to pickle via /add_pickle and returns the upstream CID.
+func (c *Client) AddPickle(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
+	if data == nil {
+		return "", fmt.Errorf("r1fs: data is required")
 	}
-	return c.backend.AddYAML(ctx, data, filename, secret)
+	if c == nil || c.backend == nil {
+		return "", fmt.Errorf("r1fs: client is nil")
+	}
+	return c.backend.AddPickle(ctx, data, opts)
+}
+
+// CalculateJSONCID deterministically calculates the CID for JSON data without storing it.
+func (c *Client) CalculateJSONCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error) {
+	if data == nil {
+		return "", fmt.Errorf("r1fs: data is required")
+	}
+	if c == nil || c.backend == nil {
+		return "", fmt.Errorf("r1fs: client is nil")
+	}
+	return c.backend.CalculateJSONCID(ctx, data, nonce, opts)
+}
+
+// CalculatePickleCID deterministically calculates the CID for pickle data without storing it.
+func (c *Client) CalculatePickleCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error) {
+	if data == nil {
+		return "", fmt.Errorf("r1fs: data is required")
+	}
+	if c == nil || c.backend == nil {
+		return "", fmt.Errorf("r1fs: client is nil")
+	}
+	return c.backend.CalculatePickleCID(ctx, data, nonce, opts)
+}
+
+// AddYAML stores structured data as YAML via /add_yaml and returns the assigned CID.
+func (c *Client) AddYAML(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
+	if data == nil {
+		return "", fmt.Errorf("r1fs: data is required")
+	}
+	if c == nil || c.backend == nil {
+		return "", fmt.Errorf("r1fs: client is nil")
+	}
+	return c.backend.AddYAML(ctx, data, opts)
 }
 
 // GetYAML retrieves YAML content as raw JSON. Provide out to decode into a struct.
@@ -193,11 +227,15 @@ func decodeYAMLDocument[T any](cid string, data []byte) (*YAMLDocument[T], error
 }
 
 type Backend interface {
-	AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (cid string, err error)
-	AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (cid string, err error)
+	AddFileBase64(ctx context.Context, data []byte, opts *DataOptions) (cid string, err error)
+	AddFile(ctx context.Context, data []byte, opts *DataOptions) (cid string, err error)
 	GetFileBase64(ctx context.Context, cid string, secret string) (fileData []byte, fileName string, err error)
 	GetFile(ctx context.Context, cid string, secret string) (location *FileLocation, err error)
-	AddYAML(ctx context.Context, data any, filename string, secret string) (cid string, err error)
+	AddJSON(ctx context.Context, data any, opts *DataOptions) (cid string, err error)
+	AddPickle(ctx context.Context, data any, opts *DataOptions) (cid string, err error)
+	CalculateJSONCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error)
+	CalculatePickleCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error)
+	AddYAML(ctx context.Context, data any, opts *DataOptions) (cid string, err error)
 	GetYAML(ctx context.Context, cid string, secret string) (payload []byte, err error)
 }
 
@@ -205,24 +243,18 @@ type httpBackend struct {
 	client *httpx.Client
 }
 
-func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (cid string, err error) {
+func (b *httpBackend) AddFileBase64(ctx context.Context, data []byte, opts *DataOptions) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := map[string]any{
 		"file_base64_str": base64.StdEncoding.EncodeToString(data),
-		"filename":        filename,
 	}
 	if opts != nil {
-		if opts.Secret != "" {
-			body["secret"] = opts.Secret
-		}
-		if len(opts.Metadata) > 0 {
-			body["metadata"] = opts.Metadata
-		}
-		if opts.ContentType != "" {
-			body["content_type"] = opts.ContentType
-		}
+		applyPathOptions(body, opts)
+	}
+	if _, ok := body["filename"]; !ok {
+		return "", fmt.Errorf("r1fs: filename or filepath is required")
 	}
 	jsonBody, err := encodeJSON(body)
 	if err != nil {
@@ -257,9 +289,13 @@ func (b *httpBackend) AddFileBase64(ctx context.Context, filename string, data [
 	return response.CID, nil
 }
 
-func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte, _ int64, opts *UploadOptions) (cid string, err error) {
+func (b *httpBackend) AddFile(ctx context.Context, data []byte, opts *DataOptions) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
+	}
+	filename := resolveUploadName(opts)
+	if strings.TrimSpace(filename) == "" {
+		return "", fmt.Errorf("r1fs: filename or filepath is required")
 	}
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -270,21 +306,7 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 	if _, err := filePart.Write(data); err != nil {
 		return "", fmt.Errorf("r1fs: write multipart payload: %w", err)
 	}
-	meta := make(map[string]any)
-	if opts != nil {
-		if opts.Secret != "" {
-			meta["secret"] = opts.Secret
-		}
-		if len(opts.Metadata) > 0 {
-			meta["metadata"] = opts.Metadata
-		}
-		if opts.ContentType != "" {
-			meta["content_type"] = opts.ContentType
-		}
-	}
-	if len(meta) == 0 {
-		meta = map[string]any{}
-	}
+	meta := applyBodyJSON(opts)
 	metaBytes, err := json.Marshal(meta)
 	if err != nil {
 		return "", fmt.Errorf("r1fs: encode multipart metadata: %w", err)
@@ -323,6 +345,52 @@ func (b *httpBackend) AddFile(ctx context.Context, filename string, data []byte,
 		return "", fmt.Errorf("r1fs: missing cid in add_file response")
 	}
 	return response.CID, nil
+}
+
+func (b *httpBackend) AddJSON(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
+	if b == nil || b.client == nil {
+		return "", fmt.Errorf("r1fs: http backend not configured")
+	}
+	payload := map[string]any{
+		"data": data,
+	}
+	applyDataOptions(payload, opts)
+	return b.postCIDRequest(ctx, "add_json", payload, "add_json")
+}
+
+func (b *httpBackend) AddPickle(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
+	if b == nil || b.client == nil {
+		return "", fmt.Errorf("r1fs: http backend not configured")
+	}
+	payload := map[string]any{
+		"data": data,
+	}
+	applyDataOptions(payload, opts)
+	return b.postCIDRequest(ctx, "add_pickle", payload, "add_pickle")
+}
+
+func (b *httpBackend) CalculateJSONCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error) {
+	if b == nil || b.client == nil {
+		return "", fmt.Errorf("r1fs: http backend not configured")
+	}
+	payload := map[string]any{
+		"data":  data,
+		"nonce": nonce,
+	}
+	applyDataOptions(payload, opts)
+	return b.postCIDRequest(ctx, "calculate_json_cid", payload, "calculate_json_cid")
+}
+
+func (b *httpBackend) CalculatePickleCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error) {
+	if b == nil || b.client == nil {
+		return "", fmt.Errorf("r1fs: http backend not configured")
+	}
+	payload := map[string]any{
+		"data":  data,
+		"nonce": nonce,
+	}
+	applyDataOptions(payload, opts)
+	return b.postCIDRequest(ctx, "calculate_pickle_cid", payload, "calculate_pickle_cid")
 }
 
 func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret string) (fileData []byte, fileName string, err error) {
@@ -413,19 +481,14 @@ func (b *httpBackend) GetFile(ctx context.Context, cid string, secret string) (l
 	return loc, nil
 }
 
-func (b *httpBackend) AddYAML(ctx context.Context, data any, filename string, secret string) (cid string, err error) {
+func (b *httpBackend) AddYAML(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
 	}
 	body := map[string]any{
 		"data": data,
 	}
-	if strings.TrimSpace(filename) != "" {
-		body["fn"] = filename
-	}
-	if strings.TrimSpace(secret) != "" {
-		body["secret"] = secret
-	}
+	applyDataOptions(body, opts)
 	jsonBody, err := encodeJSON(body)
 	if err != nil {
 		return "", err
@@ -487,4 +550,110 @@ func (b *httpBackend) GetYAML(ctx context.Context, cid string, secret string) (p
 		return nil, nil
 	}
 	return data, nil
+}
+
+func (b *httpBackend) postCIDRequest(ctx context.Context, path string, payload map[string]any, op string) (string, error) {
+	jsonBody, err := encodeJSON(payload)
+	if err != nil {
+		return "", err
+	}
+	req := &httpx.Request{
+		Method: http.MethodPost,
+		Path:   path,
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   bytes.NewReader(jsonBody),
+		GetBody: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(jsonBody)), nil
+		},
+	}
+	resp, err := b.client.Do(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		CID string `json:"cid"`
+	}
+	if err := ratio1api.DecodeResult(payloadBytes, &response); err != nil {
+		return "", fmt.Errorf("r1fs: decode %s response: %w", op, err)
+	}
+	if strings.TrimSpace(response.CID) == "" {
+		return "", fmt.Errorf("r1fs: missing cid in %s response", op)
+	}
+	return response.CID, nil
+}
+
+func applyDataOptions(payload map[string]any, opts *DataOptions) {
+	if opts == nil {
+		return
+	}
+	if strings.TrimSpace(opts.Secret) != "" {
+		payload["secret"] = opts.Secret
+	}
+	if strings.TrimSpace(opts.Filename) != "" {
+		payload["fn"] = opts.Filename
+	}
+	if strings.TrimSpace(opts.FilePath) != "" {
+		payload["file_path"] = opts.FilePath
+	}
+	if opts.Nonce != nil {
+		payload["nonce"] = *opts.Nonce
+	}
+}
+
+func applyPathOptions(payload map[string]any, opts *DataOptions) {
+	if opts == nil {
+		return
+	}
+	if strings.TrimSpace(opts.Filename) != "" {
+		payload["filename"] = opts.Filename
+	}
+	if strings.TrimSpace(opts.FilePath) != "" {
+		payload["file_path"] = opts.FilePath
+		if _, ok := payload["filename"]; !ok {
+			payload["filename"] = opts.FilePath
+		}
+	}
+	if strings.TrimSpace(opts.Secret) != "" {
+		payload["secret"] = opts.Secret
+	}
+	if opts.Nonce != nil {
+		payload["nonce"] = *opts.Nonce
+	}
+}
+
+func resolveUploadName(opts *DataOptions) string {
+	if opts == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(opts.Filename); name != "" {
+		return name
+	}
+	if path := strings.TrimSpace(opts.FilePath); path != "" {
+		return filepath.Base(path)
+	}
+	return ""
+}
+
+func applyBodyJSON(opts *DataOptions) map[string]any {
+	meta := make(map[string]any)
+	if opts == nil {
+		return meta
+	}
+	if strings.TrimSpace(opts.Secret) != "" {
+		meta["secret"] = opts.Secret
+	}
+	if opts.Nonce != nil {
+		meta["nonce"] = *opts.Nonce
+	}
+	if strings.TrimSpace(opts.Filename) != "" {
+		meta["fn"] = opts.Filename
+	}
+	if strings.TrimSpace(opts.FilePath) != "" {
+		meta["file_path"] = opts.FilePath
+	}
+	return meta
 }
