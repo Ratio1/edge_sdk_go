@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestNewFromEnvHTTP(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/get":
 			w.Header().Set("Content-Type", "application/json")
@@ -26,7 +25,8 @@ func TestNewFromEnvHTTP(t *testing.T) {
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
-	}))
+	})
+	srv := newLocalHTTPServer(t, handler)
 	defer srv.Close()
 
 	t.Setenv("R1_RUNTIME_MODE", "http")
@@ -62,8 +62,8 @@ func TestNewFromEnvMockFallback(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if _, err := client.Put(ctx, "key", map[string]int{"count": 1}, nil); err != nil {
-		t.Fatalf("mock Put: %v", err)
+	if err := client.Set(ctx, "key", map[string]int{"count": 1}, nil); err != nil {
+		t.Fatalf("mock Set: %v", err)
 	}
 }
 

@@ -20,8 +20,8 @@ const (
 
 // NewFromEnv initialises an R1FS client based on Ratio1 environment variables
 // and returns the resolved mode ("http" or "mock").
-func NewFromEnv() (*Client, string, error) {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv(envR1Mode)))
+func NewFromEnv() (client *Client, mode string, err error) {
+	mode = strings.ToLower(strings.TrimSpace(os.Getenv(envR1Mode)))
 	baseURL := strings.TrimSpace(os.Getenv(envR1FSURL))
 
 	switch mode {
@@ -68,25 +68,40 @@ type mockBackend struct {
 	store *mockFS
 }
 
-func (b *mockBackend) AddFileBase64(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
-	return b.store.addFileBase64(ctx, filename, data, size, opts)
+func (b *mockBackend) AddFileBase64(ctx context.Context, data []byte, opts *DataOptions) (string, error) {
+	return b.store.addFileBase64(ctx, data, opts)
 }
 
 func (b *mockBackend) GetFileBase64(ctx context.Context, cid string, secret string) ([]byte, string, error) {
 	return b.store.getFileBase64(ctx, cid, secret)
 }
 
-func (b *mockBackend) AddFile(ctx context.Context, filename string, data []byte, size int64, opts *UploadOptions) (*FileStat, error) {
-	stat, _, err := b.store.addFile(ctx, filename, data, size, opts)
-	return stat, err
+func (b *mockBackend) AddFile(ctx context.Context, data []byte, opts *DataOptions) (string, error) {
+	return b.store.addFile(ctx, data, opts)
 }
 
 func (b *mockBackend) GetFile(ctx context.Context, cid string, secret string) (*FileLocation, error) {
 	return b.store.getFile(ctx, cid)
 }
 
-func (b *mockBackend) AddYAML(ctx context.Context, data any, filename string, secret string) (string, error) {
-	return b.store.addYAML(ctx, data, filename, secret)
+func (b *mockBackend) AddJSON(ctx context.Context, data any, opts *DataOptions) (string, error) {
+	return b.store.addJSON(ctx, data, opts)
+}
+
+func (b *mockBackend) AddPickle(ctx context.Context, data any, opts *DataOptions) (string, error) {
+	return b.store.addPickle(ctx, data, opts)
+}
+
+func (b *mockBackend) CalculateJSONCID(ctx context.Context, data any, nonce int, opts *DataOptions) (string, error) {
+	return b.store.calculateJSONCID(ctx, data, nonce, opts)
+}
+
+func (b *mockBackend) CalculatePickleCID(ctx context.Context, data any, nonce int, opts *DataOptions) (string, error) {
+	return b.store.calculatePickleCID(ctx, data, nonce, opts)
+}
+
+func (b *mockBackend) AddYAML(ctx context.Context, data any, opts *DataOptions) (string, error) {
+	return b.store.addYAML(ctx, data, opts)
 }
 
 func (b *mockBackend) GetYAML(ctx context.Context, cid string, secret string) ([]byte, error) {

@@ -10,12 +10,18 @@ The library mirrors the FastAPI plugins shipped in the Ratio1 edge node:
 - [`cstore_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py)
 - [`r1fs_manager_api.py`](https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py)
 
-When the official APIs lack features (TTL headers, directory listings, deletes), the SDK documents the gap with TODO markers and either omits the surface or returns `ErrUnsupportedFeature` where appropriate.
+When the official APIs lack features (TTL headers, directory listings, deletes), the SDK documents the gap with TODO markers and limits its surface to what the upstream currently exposes.
 
 ## Install
 
 ```bash
 go get github.com/Ratio1/ratio1_sdk_go
+```
+
+or for new features in development
+
+```bash
+go get github.com/Ratio1/ratio1_sdk_go@develop
 ```
 
 ## Environment variables
@@ -58,7 +64,7 @@ Each tagged release includes pre-built archives named `ratio1-sandbox_<os>_<arch
 curl -L https://github.com/Ratio1/ratio1_sdk_go/releases/latest/download/ratio1-sandbox_darwin_arm64.tar.gz \
   | tar -xz
 chmod +x ratio1-sandbox
-./ratio1-sandbox --addr :8787
+./ratio1-sandbox --cstore-addr :8787 --r1fs-addr :8788
 ```
 
 Windows users can download `ratio1-sandbox_windows_amd64.zip`, unzip it, and run `ratio1-sandbox.exe`.
@@ -74,7 +80,7 @@ go run ./examples/runtime_modes
 If you prefer to rebuild locally:
 
 ```bash
-go run ./cmd/ratio1-sandbox --addr :8787
+go run ./cmd/ratio1-sandbox --cstore-addr :8787 --r1fs-addr :8788
 ```
 
 #### Flags and behaviours
@@ -84,7 +90,7 @@ go run ./cmd/ratio1-sandbox --addr :8787
 - `--latency 200ms` – inject fixed latency before every request.
 - `--fail rate=0.05,code=500` – randomly inject HTTP failures.
 
-The sandbox mounts both APIs under the same host and supports the endpoints used by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/get_status_r1fs`). Point both `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL` to the address shown in the startup banner when developing against the sandbox.
+The sandbox now starts separate listeners for CStore and R1FS. The banner prints two `export` lines – set `EE_CHAINSTORE_API_URL` to the CStore address and `EE_R1FS_API_URL` to the R1FS address. Both surfaces expose the endpoints exercised by the SDK (CStore: `/set`, `/get`, `/get_status`, `/hset`, `/hget`, `/hgetall`; R1FS: `/add_file_base64`, `/add_file`, `/get_file_base64`, `/get_file`, `/add_yaml`, `/get_yaml`, `/add_json`, `/add_pickle`, `/calculate_json_cid`, `/calculate_pickle_cid`, `/get_status`).
 
 ## Usage snippets
 
@@ -120,27 +126,26 @@ func main() {
 
 	// Key/value primitives
 	counter := Counter{Count: 1}
-	if _, err := cs.Put(ctx, "jobs:123", counter, nil); err != nil {
-		log.Fatalf("cstore put: %v", err)
-	}
+    if err := cs.Set(ctx, "jobs:123", counter, nil); err != nil {
+        log.Fatalf("cstore set: %v", err)
+    }
 	var stored Counter
 	if _, err := cs.Get(ctx, "jobs:123", &stored); err != nil {
 		log.Fatalf("cstore get: %v", err)
 	}
 	fmt.Println("retrieved counter:", stored.Count)
 
-	if _, err := cs.PutJSON(ctx, "jobs:meta", `{"owner":"alice"}`, nil); err != nil {
-		log.Fatalf("cstore put json: %v", err)
-	}
-	raw, err := cs.GetJSON(ctx, "jobs:meta")
+	status, err := cs.GetStatus(ctx)
 	if err != nil {
-		log.Fatalf("cstore get json: %v", err)
+		log.Fatalf("cstore get_status: %v", err)
 	}
-	fmt.Println("raw metadata:", string(raw))
+	if status != nil {
+		fmt.Println("stored keys:", status.Keys)
+	}
 
-	if _, err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
-		log.Fatalf("cstore hset: %v", err)
-	}
+    if err := cs.HSet(ctx, "jobs", "123", map[string]string{"status": "queued"}, nil); err != nil {
+        log.Fatalf("cstore hset: %v", err)
+    }
 	hItems, err := cs.HGetAll(ctx, "jobs")
 	if err != nil {
 		log.Fatalf("cstore hgetall: %v", err)
@@ -155,23 +160,23 @@ func main() {
 
 	// File primitives
 	data := []byte(`{"ok":true}`)
-	stat, err := fs.AddFileBase64(ctx, "/outputs/result.json", bytes.NewReader(data), int64(len(data)), &r1fs.UploadOptions{ContentType: "application/json"})
+	base64CID, err := fs.AddFileBase64(ctx, bytes.NewReader(data), &r1fs.DataOptions{FilePath: "/outputs/result.json"})
 	if err != nil {
 		log.Fatalf("r1fs upload: %v", err)
 	}
-	fmt.Printf("uploaded CID: %s\n", stat.Path)
+	fmt.Printf("uploaded CID: %s\n", base64CID)
 
-	fileStat, err := fs.AddFile(ctx, "artifact.bin", bytes.NewReader([]byte{0xde, 0xad}), 2, nil)
+	fileCID, err := fs.AddFile(ctx, bytes.NewReader([]byte{0xde, 0xad}), &r1fs.DataOptions{Filename: "artifact.bin"})
 	if err != nil {
 		log.Fatalf("r1fs add_file: %v", err)
 	}
-	loc, err := fs.GetFile(ctx, fileStat.Path, "")
+	loc, err := fs.GetFile(ctx, fileCID, "")
 	if err != nil {
 		log.Fatalf("r1fs get_file: %v", err)
 	}
 	fmt.Printf("file stored at: %s (filename=%s)\n", loc.Path, loc.Filename)
 
-	cid, err := fs.AddYAML(ctx, map[string]any{"service": "r1fs", "enabled": true}, &r1fs.YAMLOptions{Filename: "config.yaml"})
+	cid, err := fs.AddYAML(ctx, map[string]any{"service": "r1fs", "enabled": true}, &r1fs.DataOptions{Filename: "config.yaml"})
 	if err != nil {
 		log.Fatalf("r1fs add_yaml: %v", err)
 	}
@@ -180,6 +185,12 @@ func main() {
 		log.Fatalf("r1fs get_yaml: %v", err)
 	}
 	fmt.Println("yaml document:", yamlDoc)
+
+	calcCID, err := fs.CalculateJSONCID(ctx, map[string]any{"service": "r1fs"}, 42, nil)
+	if err != nil {
+		log.Fatalf("r1fs calculate_json_cid: %v", err)
+	}
+	fmt.Println("calculated cid:", calcCID)
 }
 ```
 
@@ -188,7 +199,7 @@ func main() {
 ## Examples
 
 - `examples/runtime_modes` – spins up local test servers and shows how `http`, `auto`, and `mock` resolution behaves.
-- `examples/cstore` – exercises every public CStore helper including JSON and hash utilities.
+- `examples/cstore` – exercises the supported CStore operations (Set/Get/HSet/HGet/HGetAll/GetStatus).
 - `examples/r1fs` – demonstrates uploads, metadata lookups, and YAML helpers against a simulated manager.
 
 ## Development
@@ -202,10 +213,5 @@ make sandbox-dist  # build dist/ratio1-sandbox_<os>_<arch>.tar.gz for release up
 make tag VERSION=v0.1.0
 ```
 
-## Limitations & TODOs
-
-- The CStore REST manager still lacks TTL and conditional write headers; the SDK surfaces these gaps via `ErrUnsupportedFeature` and TODO comments pointing back to the Python sources.
-- R1FS streaming is implemented via base64 payloads; a TODO tracks upgrading to streaming uploads when supported.
-- CStore `Put` ignores TTL/conditional headers until the REST manager accepts them.
 
 Bug reports and contributions are welcome through pull requests or issues in the Ratio1 organisation.

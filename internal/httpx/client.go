@@ -153,7 +153,6 @@ func (c *Client) Do(ctx context.Context, req *Request) (*http.Response, error) {
 
 	attempt := 0
 	backoff := NewBackoff(c.retryPolicy.BaseDelay, c.retryPolicy.MaxDelay, c.retryPolicy.Jitter)
-
 	for {
 		select {
 		case <-ctx.Done():
