@@ -25,7 +25,6 @@ func TestNewFromEnvHTTP(t *testing.T) {
 	srv := newLocalHTTPServer(t, handler)
 	defer srv.Close()
 
-	t.Setenv("R1_RUNTIME_MODE", "http")
 	t.Setenv("EE_R1FS_API_URL", srv.URL)
 
 	client, err := r1fs.NewFromEnv()
@@ -35,5 +34,21 @@ func TestNewFromEnvHTTP(t *testing.T) {
 
 	if _, _, err := client.GetFileBase64(context.Background(), "/missing", ""); err != nil {
 		t.Fatalf("GetFileBase64: %v", err)
+	}
+}
+
+func TestNewFromEnvMissingURL(t *testing.T) {
+	t.Setenv("EE_R1FS_API_URL", "")
+
+	if _, err := r1fs.NewFromEnv(); err == nil {
+		t.Fatalf("expected error for unset URL")
+	}
+}
+
+func TestNewFromEnvInvalidURL(t *testing.T) {
+	t.Setenv("EE_R1FS_API_URL", "://not-a-url")
+
+	if _, err := r1fs.NewFromEnv(); err == nil {
+		t.Fatalf("expected error for invalid URL")
 	}
 }

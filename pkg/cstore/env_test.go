@@ -27,7 +27,6 @@ func TestNewFromEnvHTTP(t *testing.T) {
 	srv := newLocalHTTPServer(t, handler)
 	defer srv.Close()
 
-	t.Setenv("R1_RUNTIME_MODE", "http")
 	t.Setenv("EE_CHAINSTORE_API_URL", srv.URL)
 
 	client, err := cstore.NewFromEnv()
@@ -41,5 +40,21 @@ func TestNewFromEnvHTTP(t *testing.T) {
 	}
 	if item != nil {
 		t.Fatalf("expected nil item, got %#v", item)
+	}
+}
+
+func TestNewFromEnvMissingURL(t *testing.T) {
+	t.Setenv("EE_CHAINSTORE_API_URL", "")
+
+	if _, err := cstore.NewFromEnv(); err == nil {
+		t.Fatalf("expected error for unset URL")
+	}
+}
+
+func TestNewFromEnvInvalidURL(t *testing.T) {
+	t.Setenv("EE_CHAINSTORE_API_URL", "://not-a-url")
+
+	if _, err := cstore.NewFromEnv(); err == nil {
+		t.Fatalf("expected error for invalid URL")
 	}
 }

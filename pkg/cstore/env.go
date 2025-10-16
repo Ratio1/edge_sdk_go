@@ -10,15 +10,14 @@ const (
 	envCStoreURL = "EE_CHAINSTORE_API_URL"
 )
 
-// NewFromEnv initialises a Client based on Ratio1 environment variables and
-// returns the resolved mode ("http" or "mock").
+// NewFromEnv initialises a Client using the live CStore manager URL exported by
+// Ratio1 nodes. It fails when the environment variable is unset.
 func NewFromEnv() (client *Client, err error) {
 	baseURL := strings.TrimSpace(os.Getenv(envCStoreURL))
 	if baseURL == "" {
 		return nil, fmt.Errorf("cstore: HTTP env requires %s", envCStoreURL)
 	}
 	return newHTTPClient(baseURL)
-
 }
 
 func newHTTPClient(baseURL string) (*Client, error) {

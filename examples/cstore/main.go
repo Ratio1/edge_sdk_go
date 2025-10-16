@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"sort"
-	"sync"
+	"log"
+	"strings"
+	"time"
 
 	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
 )
@@ -17,172 +17,69 @@ type counter struct {
 }
 
 func main() {
-	server := newCStoreServer()
-	defer server.Close()
+	keyPrefix := flag.String("key-prefix", "ratio1-sdk-demo", "prefix for keys written by the example")
+	flag.Parse()
 
-	client, err := cstore.New(server.URL)
+	client, err := cstore.NewFromEnv()
 	if err != nil {
-		panic(err)
+		log.Fatalf("bootstrap CStore client: %v", err)
 	}
-	ctx := context.Background()
 
-	fmt.Println("== Put/Get ==")
-	if err := client.Set(ctx, "jobs:1", counter{Count: 1}, nil); err != nil {
-		panic(err)
-	}
-	var itemValue counter
-	if _, err := client.Get(ctx, "jobs:1", &itemValue); err != nil {
-		panic(err)
-	}
-	fmt.Printf("jobs:1 => %+v\n", itemValue)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	fmt.Println("\n== GetStatus ==")
+	prefix := strings.TrimSuffix(strings.TrimSpace(*keyPrefix), ":")
+	if prefix == "" {
+		prefix = "ratio1-sdk-demo"
+	}
+	kvKey := fmt.Sprintf("%s:%d", prefix, time.Now().UnixNano())
+	hashKey := fmt.Sprintf("%s:hash", prefix)
+
+	fmt.Printf("Writing counter to %q...\n", kvKey)
+	if err := client.Set(ctx, kvKey, counter{Count: 1}, nil); err != nil {
+		log.Fatalf("Set %s: %v", kvKey, err)
+	}
+
+	var stored counter
+	item, err := client.Get(ctx, kvKey, &stored)
+	if err != nil {
+		log.Fatalf("Get %s: %v", kvKey, err)
+	}
+	fmt.Printf("Fetched %q -> %+v (raw payload: %s)\n", kvKey, stored, string(item.Value))
+
+	fmt.Printf("\nHash operations on %q...\n", hashKey)
+	if err := client.HSet(ctx, hashKey, "demo", map[string]any{"status": "queued"}, nil); err != nil {
+		log.Fatalf("HSet %s demo: %v", hashKey, err)
+	}
+
+	var hashValue map[string]any
+	hashItem, err := client.HGet(ctx, hashKey, "demo", &hashValue)
+	if err != nil {
+		log.Fatalf("HGet %s demo: %v", hashKey, err)
+	}
+	fmt.Printf("Hash field %q -> %v (raw payload: %s)\n", hashItem.Field, hashValue, string(hashItem.Value))
+
+	all, err := client.HGetAll(ctx, hashKey)
+	if err != nil {
+		log.Fatalf("HGetAll %s: %v", hashKey, err)
+	}
+	fmt.Printf("All hash fields for %q (%d entries):\n", hashKey, len(all))
+	for _, entry := range all {
+		var decoded map[string]any
+		if err := json.Unmarshal(entry.Value, &decoded); err != nil {
+			log.Fatalf("decode hash entry %s: %v", entry.Field, err)
+		}
+		fmt.Printf("  %s => %v\n", entry.Field, decoded)
+	}
+
+	fmt.Println("\nFetching service status...")
 	status, err := client.GetStatus(ctx)
 	if err != nil {
-		panic(err)
+		log.Fatalf("GetStatus: %v", err)
 	}
-	if status != nil {
-		fmt.Printf("keys => %v\n", status.Keys)
+	if status == nil {
+		fmt.Println("Status endpoint returned no payload.")
+		return
 	}
-
-	fmt.Println("\n== Hash operations (HSet/HGet/HGetAll) ==")
-	if err := client.HSet(ctx, "h:jobs", "1", map[string]string{"status": "queued"}, nil); err != nil {
-		panic(err)
-	}
-	var hValue map[string]string
-	if _, err := client.HGet(ctx, "h:jobs", "1", &hValue); err != nil {
-		panic(err)
-	}
-	fmt.Println("field 1 ->", hValue)
-	if err := client.HSet(ctx, "h:jobs", "2", map[string]string{"status": "running"}, nil); err != nil {
-		panic(err)
-	}
-	hItems, err := client.HGetAll(ctx, "h:jobs")
-	if err != nil {
-		panic(err)
-	}
-	for _, it := range hItems {
-		var value map[string]string
-		if err := json.Unmarshal(it.Value, &value); err != nil {
-			panic(err)
-		}
-		fmt.Printf("hash %s field %s -> %v\n", it.HashKey, it.Field, value)
-	}
-}
-
-func newCStoreServer() *httptest.Server {
-	var (
-		mu    sync.Mutex
-		store = map[string]json.RawMessage{}
-		hash  = map[string]map[string]json.RawMessage{}
-	)
-
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/set":
-			var payload struct {
-				Key   string          `json:"key"`
-				Value json.RawMessage `json:"value"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			mu.Lock()
-			store[payload.Key] = append([]byte(nil), payload.Value...)
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte("true"))
-
-		case "/get":
-			key := r.URL.Query().Get("key")
-			mu.Lock()
-			value, ok := store[key]
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			if !ok {
-				_, _ = w.Write([]byte("null"))
-				return
-			}
-			// Upstream wraps the JSON payload inside result
-			resp := struct {
-				Result json.RawMessage `json:"result"`
-			}{Result: value}
-			_ = json.NewEncoder(w).Encode(resp)
-
-		case "/get_status":
-			mu.Lock()
-			keys := make([]string, 0, len(store))
-			for k := range store {
-				keys = append(keys, k)
-			}
-			mu.Unlock()
-			sort.Strings(keys)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"result": map[string]any{"keys": keys},
-			})
-
-		case "/hset":
-			var req struct {
-				HashKey string          `json:"hkey"`
-				Field   string          `json:"key"`
-				Value   json.RawMessage `json:"value"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			mu.Lock()
-			bucket := hash[req.HashKey]
-			if bucket == nil {
-				bucket = make(map[string]json.RawMessage)
-				hash[req.HashKey] = bucket
-			}
-			bucket[req.Field] = append([]byte(nil), req.Value...)
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte("true"))
-
-		case "/hget":
-			hkey := r.URL.Query().Get("hkey")
-			field := r.URL.Query().Get("key")
-			mu.Lock()
-			bucket := hash[hkey]
-			value, ok := bucket[field]
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			if !ok {
-				_, _ = w.Write([]byte("null"))
-				return
-			}
-			resp := struct {
-				Result json.RawMessage `json:"result"`
-			}{Result: value}
-			_ = json.NewEncoder(w).Encode(resp)
-
-		case "/hgetall":
-			hkey := r.URL.Query().Get("hkey")
-			mu.Lock()
-			bucket := hash[hkey]
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			if len(bucket) == 0 {
-				_, _ = w.Write([]byte("null"))
-				return
-			}
-			payload := make(map[string]json.RawMessage, len(bucket))
-			for field, val := range bucket {
-				payload[field] = val
-			}
-			encoded, _ := json.Marshal(payload)
-			resp := struct {
-				Result json.RawMessage `json:"result"`
-			}{Result: json.RawMessage(encoded)}
-			_ = json.NewEncoder(w).Encode(resp)
-
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	fmt.Printf("Reported keys: %v\n", status.Keys)
 }
