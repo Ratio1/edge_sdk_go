@@ -4,8 +4,7 @@
 - REST APIs sourced from Ratio1/edge_node:
   - https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py
   - https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py
-- Runtime modes: `auto`, `http`, `mock` determined by `R1_RUNTIME_MODE`, `EE_CHAINSTORE_API_URL`, `EE_R1FS_API_URL`.
-- Optional mock seeds via `R1_MOCK_CSTORE_SEED`, `R1_MOCK_R1FS_SEED`.
+- Clients initialise directly against live HTTP endpoints using `EE_CHAINSTORE_API_URL` and `EE_R1FS_API_URL`.
 
 # Roles
 - Repo Architect
@@ -15,13 +14,13 @@
   - Keep HTTP clients aligned with upstream Python APIs.
   - Expand tests and examples, ensure streaming paths remain efficient.
 - DX Engineer
-  - Extend mocks and sandbox server (latency, failure injection, seed formats).
-  - Provide developer tooling and quick start guidance.
+  - Maintain developer tooling, runnable examples, and environment diagnostics for live integrations.
+  - Ensure setup instructions cover production and staging environments.
 - Release Engineer
   - Own tagging strategy (v0.x), CI on tags, release notes coordination.
   - Track compatibility considerations in README.
 - Test Engineer
-  - Add unit tests for mocks and HTTP behaviours (including retries, context cancellation).
+  - Add unit tests for HTTP behaviours (including retries, context cancellation).
   - Maintain golden fixtures for JSON contracts.
 - Docs Writer
   - Keep README, package docs, and API assumptions up to date.
@@ -44,6 +43,6 @@ Expand R1FS streaming
 Add multipart upload for large files if supported by the API; otherwise provide chunked upload fallback with content-range headers. Document limits.
 ```
 ```
-DX polish
-Enhance cmd/ratio1-sandbox to support /__seed/reset, /__health, and inline YAML seeds. Print exportable env snippets.
+Live endpoint validation
+Build diagnostics that verify configured CStore and R1FS endpoints (auth, headers, latency) and report actionable errors.
 ```
