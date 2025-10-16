@@ -35,7 +35,7 @@ func NewWithHTTPClient(httpClient *httpx.Client) *Client {
 	return &Client{backend: &httpBackend{client: httpClient}}
 }
 
-// NewWithBackend allows callers to supply a custom backend (e.g., mocks).
+// NewWithBackend allows callers to supply a custom backend (typically for tests).
 func NewWithBackend(b Backend) *Client {
 	return &Client{backend: b}
 }
