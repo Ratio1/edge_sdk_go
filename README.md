@@ -46,6 +46,8 @@ go run ./examples/cstore          # walks through CStore write/read flows
 go run ./examples/r1fs            # uploads and inspects files through R1FS
 ```
 
+For local development, the [Ratio1 plugin sandbox](https://github.com/Ratio1/r1-plugins-sandbox) can emulate the CStore and R1FS APIs without hitting production endpoints.
+
 ## Usage snippets
 
 ```go
