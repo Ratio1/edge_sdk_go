@@ -25,16 +25,6 @@ func main() {
 	if err := demoHTTP(); err != nil {
 		log.Fatalf("http demo: %v", err)
 	}
-
-	fmt.Println("\n== Auto mode (falls back to HTTP when URLs are present) ==")
-	if err := demoAuto(); err != nil {
-		log.Fatalf("auto demo: %v", err)
-	}
-
-	fmt.Println("\n== Mock mode using in-memory stores ==")
-	if err := demoMock(); err != nil {
-		log.Fatalf("mock demo: %v", err)
-	}
 }
 
 func demoHTTP() error {
@@ -48,11 +38,10 @@ func demoHTTP() error {
 	})
 	defer unsetEnv("R1_RUNTIME_MODE", "EE_CHAINSTORE_API_URL", "EE_R1FS_API_URL")
 
-	cs, fs, mode, err := bootstrapFromEnv()
+	cs, fs, err := bootstrapFromEnv()
 	if err != nil {
 		return err
 	}
-	fmt.Println("resolved mode:", mode)
 
 	ctx := context.Background()
 	if err := cs.Set(ctx, "jobs:1", map[string]any{"status": "queued"}, nil); err != nil {
@@ -75,90 +64,6 @@ func demoHTTP() error {
 	return nil
 }
 
-func demoAuto() error {
-	server := newSandboxServer()
-	defer server.Close()
-
-	setEnv(map[string]string{
-		"R1_RUNTIME_MODE":       "auto",
-		"EE_CHAINSTORE_API_URL": server.URL,
-		"EE_R1FS_API_URL":       server.URL,
-	})
-	defer unsetEnv("R1_RUNTIME_MODE", "EE_CHAINSTORE_API_URL", "EE_R1FS_API_URL")
-
-	cs, fs, mode, err := bootstrapFromEnv()
-	if err != nil {
-		return err
-	}
-	fmt.Println("resolved mode:", mode)
-
-	ctx := context.Background()
-	if err := cs.HSet(ctx, "jobs", "1", map[string]int{"attempts": 1}, nil); err != nil {
-		return err
-	}
-	var hItemValue map[string]int
-	if _, err := cs.HGet(ctx, "jobs", "1", &hItemValue); err != nil {
-		return err
-	}
-	fmt.Println("cstore hget:", hItemValue)
-
-	cid, err := fs.AddYAML(ctx, map[string]string{"env": "auto"}, &r1fs.DataOptions{Filename: "env.yaml"})
-	if err != nil {
-		return err
-	}
-	var yamlData map[string]string
-	if _, err := fs.GetYAML(ctx, cid, "", &yamlData); err != nil {
-		return err
-	}
-	fmt.Println("r1fs get_yaml:", yamlData)
-
-	return nil
-}
-
-func demoMock() error {
-	setEnv(map[string]string{
-		"R1_RUNTIME_MODE": "mock",
-	})
-	defer unsetEnv("R1_RUNTIME_MODE")
-
-	cs, fs, mode, err := bootstrapFromEnv()
-	if err != nil {
-		return err
-	}
-	fmt.Println("resolved mode:", mode)
-
-	ctx := context.Background()
-	if err := cs.Set(ctx, "users:1", map[string]string{"name": "mock"}, nil); err != nil {
-		return err
-	}
-	status, err := cs.GetStatus(ctx)
-	if err != nil {
-		return err
-	}
-	if status != nil {
-		for _, key := range status.Keys {
-			var value map[string]string
-			if _, err := cs.Get(ctx, key, &value); err != nil {
-				return fmt.Errorf("decode item %s: %w", key, err)
-			}
-			fmt.Printf("mock cstore item %s -> %v\n", key, value)
-		}
-	}
-
-	content := []byte("mock payload")
-	cid, err := fs.AddFile(ctx, bytes.NewReader(content), &r1fs.DataOptions{Filename: "mock.bin"})
-	if err != nil {
-		return err
-	}
-	loc, err := fs.GetFile(ctx, cid, "")
-	if err != nil {
-		return err
-	}
-	fmt.Println("mock r1fs file path:", loc.Path)
-
-	return nil
-}
-
 func setEnv(values map[string]string) {
 	for k, v := range values {
 		if err := os.Setenv(k, v); err != nil {
@@ -173,23 +78,16 @@ func unsetEnv(keys ...string) {
 	}
 }
 
-func bootstrapFromEnv() (*cstore.Client, *r1fs.Client, string, error) {
-	cs, cMode, err := cstore.NewFromEnv()
+func bootstrapFromEnv() (*cstore.Client, *r1fs.Client, error) {
+	cs, err := cstore.NewFromEnv()
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("bootstrap cstore: %w", err)
+		return nil, nil, fmt.Errorf("bootstrap cstore: %w", err)
 	}
-	fs, fMode, err := r1fs.NewFromEnv()
+	fs, err := r1fs.NewFromEnv()
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("bootstrap r1fs: %w", err)
+		return nil, nil, fmt.Errorf("bootstrap r1fs: %w", err)
 	}
-	mode := cMode
-	if mode == "" {
-		mode = fMode
-	}
-	if cMode != "" && fMode != "" && cMode != fMode {
-		return nil, nil, "", fmt.Errorf("resolve runtime mode: mismatch (cstore=%s, r1fs=%s)", cMode, fMode)
-	}
-	return cs, fs, mode, nil
+	return cs, fs, nil
 }
 
 func newSandboxServer() *httptest.Server {
