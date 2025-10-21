@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
+	"github.com/Ratio1/edge_sdk_go/pkg/cstore"
 )
 
 func TestNewFromEnvHTTP(t *testing.T) {

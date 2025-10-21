@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
+	"github.com/Ratio1/edge_sdk_go/pkg/r1fs"
 )
 
 func TestAddFileBase64AndGetFileBase64(t *testing.T) {
