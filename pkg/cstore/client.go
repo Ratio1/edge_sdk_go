@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Ratio1/ratio1_sdk_go/internal/httpx"
-	"github.com/Ratio1/ratio1_sdk_go/internal/ratio1api"
+	"github.com/Ratio1/edge_sdk_go/internal/httpx"
+	"github.com/Ratio1/edge_sdk_go/internal/ratio1api"
 )
 
 // Client provides access to the upstream CStore REST API.
