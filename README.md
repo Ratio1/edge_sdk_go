@@ -1,4 +1,4 @@
-# Ratio1 SDK for Go
+# Ratio1 Edge SDK for Go
 
 Go clients for Ratio1 edge-node services:
 
@@ -15,21 +15,21 @@ When the official APIs lack features (TTL headers, directory listings, deletes),
 ## Install
 
 ```bash
-go get github.com/Ratio1/ratio1_sdk_go
+go get github.com/Ratio1/edge_sdk_go
 ```
 
 or for new features in development
 
 ```bash
-go get github.com/Ratio1/ratio1_sdk_go@develop
+go get github.com/Ratio1/edge_sdk_go@develop
 ```
 
 ## Environment variables
 
-| Variable | Meaning |
-| --- | --- |
+| Variable                | Meaning                                                            |
+| ----------------------- | ------------------------------------------------------------------ |
 | `EE_CHAINSTORE_API_URL` | Base URL for the live CStore REST manager exposed by Ratio1 nodes. |
-| `EE_R1FS_API_URL` | Base URL for the live R1FS REST manager exposed by Ratio1 nodes. |
+| `EE_R1FS_API_URL`       | Base URL for the live R1FS REST manager exposed by Ratio1 nodes.   |
 
 ## Quick start
 
@@ -60,8 +60,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/Ratio1/ratio1_sdk_go/pkg/cstore"
-	"github.com/Ratio1/ratio1_sdk_go/pkg/r1fs"
+	"github.com/Ratio1/edge_sdk_go/pkg/cstore"
+	"github.com/Ratio1/edge_sdk_go/pkg/r1fs"
 )
 
 type Counter struct {
@@ -166,6 +166,5 @@ make build      # go build ./...
 make test       # go test ./...
 make tag VERSION=v0.1.0
 ```
-
 
 Bug reports and contributions are welcome through pull requests or issues in the Ratio1 organisation.
