@@ -87,6 +87,36 @@ func (c *Client) GetFile(ctx context.Context, cid string, secret string) (locati
 	return c.backend.GetFile(ctx, cid, secret)
 }
 
+// DeleteFile removes a single CID using the /delete_file endpoint.
+func (c *Client) DeleteFile(ctx context.Context, cid string, opts *DeleteOptions) (*DeleteFileResult, error) {
+	if strings.TrimSpace(cid) == "" {
+		return nil, fmt.Errorf("r1fs: cid is required")
+	}
+	if c == nil || c.backend == nil {
+		return nil, fmt.Errorf("r1fs: client is nil")
+	}
+	return c.backend.DeleteFile(ctx, cid, opts)
+}
+
+// DeleteFiles removes multiple CIDs using the /delete_files endpoint.
+func (c *Client) DeleteFiles(ctx context.Context, cids []string, opts *DeleteOptions) (*DeleteFilesResult, error) {
+	if len(cids) == 0 {
+		return nil, fmt.Errorf("r1fs: at least one cid is required")
+	}
+	if c == nil || c.backend == nil {
+		return nil, fmt.Errorf("r1fs: client is nil")
+	}
+	normalized := make([]string, len(cids))
+	for i, cid := range cids {
+		trimmed := strings.TrimSpace(cid)
+		if trimmed == "" {
+			return nil, fmt.Errorf("r1fs: cid at index %d is empty", i)
+		}
+		normalized[i] = trimmed
+	}
+	return c.backend.DeleteFiles(ctx, normalized, opts)
+}
+
 // AddJSON stores structured JSON data via /add_json and returns the upstream CID.
 func (c *Client) AddJSON(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
 	if data == nil {
@@ -231,6 +261,8 @@ type Backend interface {
 	AddFile(ctx context.Context, data []byte, opts *DataOptions) (cid string, err error)
 	GetFileBase64(ctx context.Context, cid string, secret string) (fileData []byte, fileName string, err error)
 	GetFile(ctx context.Context, cid string, secret string) (location *FileLocation, err error)
+	DeleteFile(ctx context.Context, cid string, opts *DeleteOptions) (*DeleteFileResult, error)
+	DeleteFiles(ctx context.Context, cids []string, opts *DeleteOptions) (*DeleteFilesResult, error)
 	AddJSON(ctx context.Context, data any, opts *DataOptions) (cid string, err error)
 	AddPickle(ctx context.Context, data any, opts *DataOptions) (cid string, err error)
 	CalculateJSONCID(ctx context.Context, data any, nonce int, opts *DataOptions) (cid string, err error)
@@ -481,6 +513,91 @@ func (b *httpBackend) GetFile(ctx context.Context, cid string, secret string) (l
 	return loc, nil
 }
 
+func (b *httpBackend) DeleteFile(ctx context.Context, cid string, opts *DeleteOptions) (*DeleteFileResult, error) {
+	if b == nil || b.client == nil {
+		return nil, fmt.Errorf("r1fs: http backend not configured")
+	}
+	if strings.TrimSpace(cid) == "" {
+		return nil, fmt.Errorf("r1fs: cid is required")
+	}
+	body := map[string]any{
+		"cid": cid,
+	}
+	applyDeleteOptions(body, opts, false)
+	jsonBody, err := encodeJSON(body)
+	if err != nil {
+		return nil, err
+	}
+	req := &httpx.Request{
+		Method: http.MethodPost,
+		Path:   "delete_file",
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   bytes.NewReader(jsonBody),
+		GetBody: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(jsonBody)), nil
+		},
+	}
+	resp, err := b.client.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result DeleteFileResult
+	if err := ratio1api.DecodeResult(payloadBytes, &result); err != nil {
+		return nil, fmt.Errorf("r1fs: decode delete_file response: %w", err)
+	}
+	return &result, nil
+}
+
+func (b *httpBackend) DeleteFiles(ctx context.Context, cids []string, opts *DeleteOptions) (*DeleteFilesResult, error) {
+	if b == nil || b.client == nil {
+		return nil, fmt.Errorf("r1fs: http backend not configured")
+	}
+	if len(cids) == 0 {
+		return nil, fmt.Errorf("r1fs: at least one cid is required")
+	}
+	body := map[string]any{
+		"cids": append([]string(nil), cids...),
+	}
+	applyDeleteOptions(body, opts, true)
+	jsonBody, err := encodeJSON(body)
+	if err != nil {
+		return nil, err
+	}
+	req := &httpx.Request{
+		Method: http.MethodPost,
+		Path:   "delete_files",
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   bytes.NewReader(jsonBody),
+		GetBody: func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(jsonBody)), nil
+		},
+	}
+	resp, err := b.client.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	payloadBytes, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result DeleteFilesResult
+	if err := ratio1api.DecodeResult(payloadBytes, &result); err != nil {
+		return nil, fmt.Errorf("r1fs: decode delete_files response: %w", err)
+	}
+	res := &DeleteFilesResult{
+		Success:      append([]string(nil), result.Success...),
+		Failed:       append([]string(nil), result.Failed...),
+		Total:        result.Total,
+		SuccessCount: result.SuccessCount,
+		FailedCount:  result.FailedCount,
+	}
+	return res, nil
+}
+
 func (b *httpBackend) AddYAML(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
 	if b == nil || b.client == nil {
 		return "", fmt.Errorf("r1fs: http backend not configured")
@@ -656,4 +773,23 @@ func applyBodyJSON(opts *DataOptions) map[string]any {
 		meta["file_path"] = opts.FilePath
 	}
 	return meta
+}
+
+func applyDeleteOptions(payload map[string]any, opts *DeleteOptions, bulk bool) {
+	if opts == nil {
+		return
+	}
+	if opts.UnpinRemote != nil {
+		payload["unpin_remote"] = *opts.UnpinRemote
+	}
+	if opts.RunGC != nil {
+		key := "run_gc"
+		if bulk {
+			key = "run_gc_after_all"
+		}
+		payload[key] = *opts.RunGC
+	}
+	if opts.CleanupLocalFiles != nil {
+		payload["cleanup_local_files"] = *opts.CleanupLocalFiles
+	}
 }
