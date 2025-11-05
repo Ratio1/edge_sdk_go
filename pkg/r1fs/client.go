@@ -588,14 +588,7 @@ func (b *httpBackend) DeleteFiles(ctx context.Context, cids []string, opts *Dele
 	if err := ratio1api.DecodeResult(payloadBytes, &result); err != nil {
 		return nil, fmt.Errorf("r1fs: decode delete_files response: %w", err)
 	}
-	res := &DeleteFilesResult{
-		Success:      append([]string(nil), result.Success...),
-		Failed:       append([]string(nil), result.Failed...),
-		Total:        result.Total,
-		SuccessCount: result.SuccessCount,
-		FailedCount:  result.FailedCount,
-	}
-	return res, nil
+	return &result, nil
 }
 
 func (b *httpBackend) AddYAML(ctx context.Context, data any, opts *DataOptions) (cid string, err error) {
