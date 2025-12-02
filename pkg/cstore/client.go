@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -356,9 +355,6 @@ func (b *httpBackend) Set(ctx context.Context, key string, raw []byte, opts *Set
 		Path:   "set",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(body),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(body)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -455,9 +451,6 @@ func (b *httpBackend) HSet(ctx context.Context, hashKey, field string, raw []byt
 		Path:   "hset",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(body),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(body)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {

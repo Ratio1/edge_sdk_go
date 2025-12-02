@@ -45,13 +45,11 @@ type Client struct {
 
 // Request describes a single outbound request.
 type Request struct {
-	Method       string
-	Path         string
-	Query        url.Values
-	Header       http.Header
-	DisableRetry bool
-	Body         io.Reader
-	GetBody      func() (io.ReadCloser, error)
+	Method string
+	Path   string
+	Query  url.Values
+	Header http.Header
+	Body   io.Reader
 }
 
 // NewClient creates a Client for the provided base URL.
@@ -92,23 +90,6 @@ func (c *Client) Do(ctx context.Context, req *Request) (*http.Response, error) {
 	// Ensure body replay configuration is sane.
 	if req.Method == "" {
 		return nil, errors.New("httpx: HTTP method is required")
-	}
-
-	if req.DisableRetry {
-		req.GetBody = nil
-	} else if req.GetBody == nil && req.Body == nil {
-		// no body is OK
-	} else if req.GetBody == nil && req.Body != nil {
-		// Attempt to buffer the body for retries.
-		data, err := io.ReadAll(req.Body)
-		if err != nil {
-			return nil, fmt.Errorf("httpx: read request body: %w", err)
-		}
-		reader := bytes.NewReader(data)
-		req.Body = reader
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(data)), nil
-		}
 	}
 
 	fullURL, err := c.buildURL(req.Path, req.Query)
