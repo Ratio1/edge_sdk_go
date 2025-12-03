@@ -297,9 +297,6 @@ func (b *httpBackend) AddFileBase64(ctx context.Context, data []byte, opts *Data
 		Path:   "add_file_base64",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(jsonBody),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(jsonBody)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -355,9 +352,6 @@ func (b *httpBackend) AddFile(ctx context.Context, data []byte, opts *DataOption
 		Path:   "add_file",
 		Header: http.Header{"Content-Type": []string{writer.FormDataContentType()}},
 		Body:   bytes.NewReader(payload),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(payload)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -444,9 +438,6 @@ func (b *httpBackend) GetFileBase64(ctx context.Context, cid string, secret stri
 		Path:   "get_file_base64",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(jsonBody),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(jsonBody)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -533,9 +524,6 @@ func (b *httpBackend) DeleteFile(ctx context.Context, cid string, opts *DeleteOp
 		Path:   "delete_file",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(jsonBody),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(jsonBody)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -572,9 +560,6 @@ func (b *httpBackend) DeleteFiles(ctx context.Context, cids []string, opts *Dele
 		Path:   "delete_files",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(jsonBody),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(jsonBody)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -608,9 +593,6 @@ func (b *httpBackend) AddYAML(ctx context.Context, data any, opts *DataOptions) 
 		Path:   "add_yaml",
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(jsonBody),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(jsonBody)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
@@ -672,9 +654,6 @@ func (b *httpBackend) postCIDRequest(ctx context.Context, path string, payload m
 		Path:   path,
 		Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body:   bytes.NewReader(jsonBody),
-		GetBody: func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(jsonBody)), nil
-		},
 	}
 	resp, err := b.client.Do(ctx, req)
 	if err != nil {
