@@ -85,6 +85,17 @@ func TestClientSetGetAndStatus(t *testing.T) {
 		t.Fatalf("HGetAll decoded unexpected value: %#v", decoded)
 	}
 
+	syncResult, err := client.HSync(ctx, "jobs", nil)
+	if err != nil {
+		t.Fatalf("HSync: %v", err)
+	}
+	if syncResult == nil {
+		t.Fatalf("expected non-nil hsync result")
+	}
+	if syncResult.HashKey != "jobs" || syncResult.SourcePeer != "default-peer" || syncResult.MergedFields != 1 {
+		t.Fatalf("HSync returned unexpected result: %#v", syncResult)
+	}
+
 	status, err := client.GetStatus(ctx)
 	if err != nil {
 		t.Fatalf("GetStatus: %v", err)
@@ -100,6 +111,32 @@ func TestClientSetGetAndStatus(t *testing.T) {
 		if status.Keys[i] != key {
 			t.Fatalf("GetStatus keys mismatch: got %v want %v", status.Keys, wantKeys)
 		}
+	}
+}
+
+func TestClientHSyncForwardsPeers(t *testing.T) {
+	srv := newTestCStoreServer(t)
+	defer srv.Close()
+
+	client, err := cstore.New(srv.URL)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := client.HSet(ctx, "players", "1", counter{Count: 7}, nil); err != nil {
+		t.Fatalf("HSet: %v", err)
+	}
+
+	syncResult, err := client.HSync(ctx, "players", &cstore.HSyncOptions{ChainstorePeers: []string{"peer-a", "peer-b"}})
+	if err != nil {
+		t.Fatalf("HSync: %v", err)
+	}
+	if syncResult == nil {
+		t.Fatalf("expected non-nil hsync result")
+	}
+	if syncResult.HashKey != "players" || syncResult.SourcePeer != "peer-a" || syncResult.MergedFields != 1 {
+		t.Fatalf("HSync returned unexpected result: %#v", syncResult)
 	}
 }
 
@@ -379,6 +416,51 @@ func newTestCStoreServer(t *testing.T) *testServer {
 			result := struct {
 				Result json.RawMessage `json:"result"`
 			}{Result: json.RawMessage(data)}
+			_ = json.NewEncoder(w).Encode(result)
+		case "/hsync":
+			defer r.Body.Close()
+			var rawPayload map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&rawPayload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			var hkey string
+			if err := json.Unmarshal(rawPayload["hkey"], &hkey); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			var peers []string
+			_, peersProvided := rawPayload["chainstore_peers"]
+			if peersProvided {
+				if err := json.Unmarshal(rawPayload["chainstore_peers"], &peers); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+
+			mu.Lock()
+			mergedFields := len(hashStore[hkey])
+			mu.Unlock()
+
+			sourcePeer := "default-peer"
+			if peersProvided {
+				sourcePeer = ""
+				if len(peers) > 0 {
+					sourcePeer = peers[0]
+				}
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			result := struct {
+				Result struct {
+					HashKey      string `json:"hkey"`
+					SourcePeer   string `json:"source_peer"`
+					MergedFields int    `json:"merged_fields"`
+				} `json:"result"`
+			}{}
+			result.Result.HashKey = hkey
+			result.Result.SourcePeer = sourcePeer
+			result.Result.MergedFields = mergedFields
 			_ = json.NewEncoder(w).Encode(result)
 		default:
 			http.NotFound(w, r)

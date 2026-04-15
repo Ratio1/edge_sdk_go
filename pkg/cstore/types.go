@@ -23,6 +23,18 @@ type HashItem[T any] struct {
 // SetOptions is reserved for future write controls.
 type SetOptions struct{}
 
+// HSyncOptions controls optional parameters for hash sync requests.
+type HSyncOptions struct {
+	ChainstorePeers []string
+}
+
+// HSyncResult describes the payload returned by /hsync.
+type HSyncResult struct {
+	HashKey      string `json:"hkey"`
+	SourcePeer   string `json:"source_peer"`
+	MergedFields int    `json:"merged_fields"`
+}
+
 var (
 	// ErrNotFound is returned when a key is missing.
 	ErrNotFound = errors.New("cstore: not found")
