@@ -1,7 +1,7 @@
 # Overview
 
 - Ratio1 Edge SDK for Go providing CStore (key/value) and R1FS (file storage) clients.
-- CStore surface mirrors the Python manager with Set/Get/HSet/HGet/HGetAll/GetStatus only; JSON helpers and pagination are intentionally omitted.
+- CStore surface mirrors the Python manager with Set/Get/HSet/HGet/HGetAll/HSync/GetStatus only; JSON helpers and pagination are intentionally omitted.
 - REST APIs sourced from Ratio1/edge_node:
   - https://github.com/Ratio1/edge_node/blob/main/extensions/business/cstore/cstore_manager_api.py
   - https://github.com/Ratio1/edge_node/blob/main/extensions/business/r1fs/r1fs_manager_api.py

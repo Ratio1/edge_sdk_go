@@ -82,6 +82,11 @@ func (c *Client) HGetAll(ctx context.Context, hashKey string) (items []HashItem[
 	return getAllHashItems[json.RawMessage](ctx, c, hashKey)
 }
 
+// HSync refreshes a hash key from peer state.
+func (c *Client) HSync(ctx context.Context, hashKey string, opts *HSyncOptions) (*HSyncResult, error) {
+	return syncHash(ctx, c, hashKey, opts)
+}
+
 // GetStatus returns the payload exposed by the /get_status endpoint.
 func (c *Client) GetStatus(ctx context.Context) (status *Status, err error) {
 	if c == nil || c.backend == nil {
@@ -188,6 +193,28 @@ func setHashRawJSON(ctx context.Context, client *Client, hashKey, field string, 
 	raw := append([]byte(nil), bytes.TrimSpace(payload)...)
 
 	return client.backend.HSet(ctx, hashKey, field, raw, opts)
+}
+
+func syncHash(ctx context.Context, client *Client, hashKey string, opts *HSyncOptions) (*HSyncResult, error) {
+	if strings.TrimSpace(hashKey) == "" {
+		return nil, fmt.Errorf("cstore: hash key is required")
+	}
+	if client == nil || client.backend == nil {
+		return nil, fmt.Errorf("cstore: client is nil")
+	}
+	data, err := client.backend.HSync(ctx, hashKey, opts)
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var result HSyncResult
+	if err := json.Unmarshal(trimmed, &result); err != nil {
+		return nil, fmt.Errorf("cstore: decode hsync payload: %w", err)
+	}
+	return &result, nil
 }
 
 func decodeItem[T any](key string, data []byte) (*Item[T], error) {
@@ -299,6 +326,7 @@ type Backend interface {
 	HGet(ctx context.Context, hashKey, field string) (data []byte, err error)
 	HSet(ctx context.Context, hashKey, field string, raw []byte, opts *SetOptions) error
 	HGetAll(ctx context.Context, hashKey string) (data []byte, err error)
+	HSync(ctx context.Context, hashKey string, opts *HSyncOptions) (syncPayload []byte, err error)
 	GetStatus(ctx context.Context) (statusPayload []byte, err error)
 }
 
@@ -494,4 +522,44 @@ func (b *httpBackend) HGetAll(ctx context.Context, hashKey string) (data []byte,
 		return nil, nil
 	}
 	return payload, nil
+}
+
+func (b *httpBackend) HSync(ctx context.Context, hashKey string, opts *HSyncOptions) (syncPayload []byte, err error) {
+	if b == nil || b.client == nil {
+		return nil, fmt.Errorf("cstore: http backend not configured")
+	}
+	type hashSyncRequest struct {
+		HashKey         string   `json:"hkey"`
+		ChainstorePeers []string `json:"chainstore_peers,omitempty"`
+	}
+	reqPayload := hashSyncRequest{HashKey: hashKey}
+	if opts != nil && opts.ChainstorePeers != nil {
+		reqPayload.ChainstorePeers = append([]string(nil), opts.ChainstorePeers...)
+	}
+	body, err := marshalJSON(reqPayload)
+	if err != nil {
+		return nil, err
+	}
+	req := &httpx.Request{
+		Method: http.MethodPost,
+		Path:   "hsync",
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   bytes.NewReader(body),
+	}
+	resp, err := b.client.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := httpx.ReadAllAndClose(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	syncPayload, err = ratio1api.ExtractResult(raw)
+	if err != nil {
+		return nil, fmt.Errorf("cstore: decode hsync response: %w", err)
+	}
+	if syncPayload == nil {
+		return nil, nil
+	}
+	return syncPayload, nil
 }
